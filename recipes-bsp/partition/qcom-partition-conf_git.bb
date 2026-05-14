@@ -1,19 +1,16 @@
 SUMMARY = "Partition configuration for Qualcomm devices"
 DESCRIPTION = "GPT partition binaries and QDL scripts for Qualcomm reference devices"
-LICENSE = "BSD-3-Clause"
-LIC_FILES_CHKSUM = "file://LICENSE;md5=b0a8acd90d872086b279ead88af03369"
 
-SRC_URI = "git://github.com/qualcomm-linux/qcom-ptool.git;branch=main;protocol=https"
-SRCREV = "7b3365284e2c19f1457e335eb25d545e9a2c08a6"
+require qcom-ptool.inc
 
-INHIBIT_DEFAULT_DEPS = "1"
+DEPENDS = "qcom-ptool-native"
 
 inherit deploy allarch
 
 do_install[noexec] = "1"
 
 do_deploy() {
-    cd platforms
+    cd ${S}/platforms
     for gpt in `find . -name gpt_main0.bin` ; do
         QCOM_PLATFORM_SUBDIR=${gpt%%/gpt_main0.bin}
         install -d ${DEPLOYDIR}/partitions/${QCOM_PLATFORM_SUBDIR}
