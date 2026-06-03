@@ -1,0 +1,6 @@
+From: Valid Dev <valid.dev@oss.qualcomm.com>
+Subject: [PATCH] demo: do a thing
+
+---
+ a.c | 1 +
+ 1 file changed, 1 insertion(+)
