@@ -12,9 +12,8 @@ SRC_URI[camxtest.sha256sum] = "8c274e1d9f6f6db58a1cdc7bddfc6c886f6ae4d5cc61c91af
 DEPENDS += "opencv userspace-resource-manager"
 
 do_install:append() {
-    # copy skel file
-    install -d ${D}${datadir}/qcom
-    cp -r ${S}/usr/share/qcom/x1e80100 ${D}${datadir}/qcom/
+    install -d ${D}${datadir}/qcom/hexagon/v73
+    install -m 0644 ${S}/usr/share/qcom/x1e80100/Qualcomm/Hamoa-IoT-EVK/dsp/cdsp/libhme_dsp_skel.so ${D}${datadir}/qcom/hexagon/v73
 }
 PACKAGE_BEFORE_PN += "${PN}-skel"
 RDEPENDS:${PN} += "${PN}-skel"
