@@ -19,8 +19,9 @@ SRC_URI:append:qcom = " file://0001-linux-firmware-qcom-sync-audioreach-firmware
 # The topologies are binaries, which only git can apply.
 PATCHTOOL:qcom = "git"
 
-# The sync extends WHENCE, which LIC_FILES_CHKSUM checksums.
-WHENCE_CHKSUM:qcom = "530356ed22ebc408fbdcd84f38219a80"
+# The sync extends WHENCE, which LIC_FILES_CHKSUM checksums, on top of every
+# linux-firmware backport that ci/base.yml applies to oe-core.
+WHENCE_CHKSUM:qcom = "64805282ea6a6ba958541bbdf38c5416"
 
 # Topologies installed into a vendor sub-directory and symlinked from the SoC
 # directory get a package of their own, as the recipe already does for the

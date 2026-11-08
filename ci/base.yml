@@ -24,6 +24,9 @@ repos:
       003-nord-hpass-firmware:
         repo: meta-qcom
         path: patches/oe-core/0004-linux-firmware-backport-qcom-nord-hpass-firmware.patch
+      004-eliza-qupv3-firmware:
+        repo: meta-qcom
+        path: patches/oe-core/0005-linux-firmware-backport-qcom-eliza-qupv3-firmware.patch
     layers:
       meta:
 
