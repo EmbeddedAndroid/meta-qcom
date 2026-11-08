@@ -13,6 +13,7 @@ RRECOMMENDS:${PN}-firmware = " \
     ${@bb.utils.contains('DISTRO_FEATURES', 'bluetooth', 'linux-firmware-qca-qcc2072', '', d)} \
     linux-firmware-qcom-eliza-audio \
     linux-firmware-qcom-eliza-compute \
+    linux-firmware-qcom-eliza-qupv3fw \
     linux-firmware-qcom-vpu \
 "
 
