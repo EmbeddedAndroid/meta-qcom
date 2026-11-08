@@ -1,0 +1,50 @@
+From d73f22cb0a8568fe7d829ac8cc9952bf21954f40 Mon Sep 17 00:00:00 2001
+From: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Date: Sun, 8 Nov 2026 17:12:38 +0000
+Subject: [PATCH] eliza: add the CQS EVK eMMC and UFS machine names
+
+The Eliza CQS EVK device trees in qcom-next are split by boot storage
+and carry the storage in their model string:
+
+  eliza-cqs-evk-emmc.dts: "Qualcomm Technologies, Inc. Eliza CQS EVK (eMMC)"
+  eliza-cqs-evk-ufs.dts:  "Qualcomm Technologies, Inc. Eliza CQS EVK (UFS)"
+
+fastrpc matches /sys/firmware/devicetree/base/model exactly against
+the conf.d machine names, so on these boards it finds no
+DSP_LIBRARY_PATH and the audio PD searches only the current directory.
+Any ADSP graph with a dynamically loaded module then fails to open,
+e.g. the Fluence SMECNS capture graph on the eMMC EVK:
+
+  apps_std_fopen_with_env_fd failed with 0x2 for
+    ./smecns_v2_module_fvxiii.so.1 (No such file or directory)
+  mod_table.c:911: Error 0x2: open_mod_table_handle_invoke failed
+  gsl_graph_open_sgids_and_connections:3239 Graph open failed:1
+
+Add both model strings as further machine names of the Eliza CQS EVK,
+as done for the SA8775P Ride revisions; the mainline single EVK model
+stays.
+
+Rewritten for the 20261019 release, which still ships static conf.d
+YAML files instead of generating them from config.txt.
+
+Signed-off-by: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Upstream-Status: Pending
+---
+ conf.d/hexagon-dsp-binaries-qualcomm-eliza-cqs-evk.yaml | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/conf.d/hexagon-dsp-binaries-qualcomm-eliza-cqs-evk.yaml b/conf.d/hexagon-dsp-binaries-qualcomm-eliza-cqs-evk.yaml
+index 510275c..e7297f5 100644
+--- a/conf.d/hexagon-dsp-binaries-qualcomm-eliza-cqs-evk.yaml
++++ b/conf.d/hexagon-dsp-binaries-qualcomm-eliza-cqs-evk.yaml
+@@ -3,3 +3,7 @@
+ machines:
+   Qualcomm Technologies, Inc. Eliza CQS EVK :
+     DSP_LIBRARY_PATH: eliza/Qualcomm/Eliza-CQS-EVK/dsp
++  Qualcomm Technologies, Inc. Eliza CQS EVK (eMMC):
++    DSP_LIBRARY_PATH: eliza/Qualcomm/Eliza-CQS-EVK/dsp
++  Qualcomm Technologies, Inc. Eliza CQS EVK (UFS):
++    DSP_LIBRARY_PATH: eliza/Qualcomm/Eliza-CQS-EVK/dsp
+-- 
+2.43.0
+
