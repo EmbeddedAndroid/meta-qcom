@@ -2,6 +2,14 @@ require recipes-bsp/trusted-firmware-a/trusted-firmware-a.inc
 
 DEPENDS += "qtestsign-native"
 
+# With QCOM_FIRMWARE_SIGN_ENABLE, qcom-firmware-sign re-signs the test signed
+# BL2 as the TZ image.
+inherit qcom-firmware-sign
+
+QCOM_FIRMWARE_SIGN_ALLARCH = "0"
+QCOM_FIRMWARE_SIGN_DIRS = "${D}${FIRMWARE_DIR}"
+QCOM_FIRMWARE_SIGN_SUFFIXES = "mbn"
+
 # u-boot-qcom is only needed to pull u-boot.bin into the FIP. The SPL FIT flow
 # builds no FIP, and u-boot-qcom depends on this recipe for bl31.bin, so keeping
 # the dependency both ways would make bitbake reject the task graph.
