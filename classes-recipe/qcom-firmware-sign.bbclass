@@ -58,6 +58,7 @@ do_qcom_firmware_sign() {
 
 do_qcom_firmware_sign[vardeps] += "\
     QCOM_FIRMWARE_SIGN_ENABLE \
+    QCOM_FIRMWARE_SIGN_MODE \
     QCOM_FIRMWARE_SIGN_SECPROFILE \
     QCOM_FIRMWARE_SIGN_SECPROFILE_DIR \
     QCOM_FIRMWARE_SIGN_ANTI_ROLLBACK \
@@ -81,6 +82,8 @@ do_qcom_firmware_sign[noexec] = "1"
 do_qcom_firmware_sign[fakeroot] = "1"
 do_qcom_firmware_sign[depends] += "virtual/fakeroot-native:do_populate_sysroot"
 do_qcom_firmware_sign[file-checksums] += "${@qcom_firmware_sign_key_checksums(d)}"
+# QTI-REMOTE reaches the signing service from the task itself.
+do_qcom_firmware_sign[network] = "${@'1' if d.getVar('QCOM_FIRMWARE_SIGN_ENABLE') == '1' and d.getVar('QCOM_FIRMWARE_SIGN_MODE') == 'QTI-REMOTE' else '0'}"
 
 python () {
     if d.getVar('QCOM_FIRMWARE_SIGN_ENABLE') == '1':

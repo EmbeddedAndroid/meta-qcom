@@ -27,6 +27,15 @@ do_image_qcomflash[depends] += "${@bb.utils.contains('QCOM_FIRMWARE_SIGN_ENABLE'
     'qdl-native:do_populate_sysroot sectools-native:do_populate_sysroot security-profiles-native:do_populate_sysroot', '', d)}"
 do_image_qcomflash[file-checksums] += "${@qcom_firmware_sign_key_checksums(d)}"
 
+# The VIP table is OEM signed: refuse another mode when the image is
+# parsed, before any firmware or rootfs is built.
+python () {
+    mode = d.getVar('QCOM_FIRMWARE_SIGN_MODE')
+    if mode != 'LOCAL':
+        bb.fatal("qcomflash-vip: the VIP table is OEM signed, but QCOM_FIRMWARE_SIGN_MODE "
+                 "is '%s': set QTI-REMOTE only for the recipes that need it." % mode)
+}
+
 # Ahead of create_qcomflash_tarball, see image_types_qcom.bbclass.
 do_image_qcomflash[postfuncs] =+ "create_qcomflash_vip_table"
 create_qcomflash_vip_table[dirs] = "${QCOMFLASH_DIR}"

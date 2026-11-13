@@ -27,6 +27,24 @@ def qcom_firmware_sign_secprofile_path(d):
         return profile
     return os.path.join(d.getVar('QCOM_FIRMWARE_SIGN_SECPROFILE_DIR'), profile)
 
+# How sectools signs: "LOCAL" with the OEM keys below, or "QTI-REMOTE"
+# through a Qualcomm signing service, for images the Qualcomm root of trust
+# has to authenticate.  QTI-REMOTE needs no local keys; the service options
+# (server, port, capability) are site specific and come from the build
+# configuration in QCOM_FIRMWARE_SIGN_QTI_REMOTE_ARGS.
+QCOM_FIRMWARE_SIGN_MODE ??= "LOCAL"
+QCOM_FIRMWARE_SIGN_QTI_REMOTE_ARGS ?= ""
+# Site specific: keep it out of the task signatures (and so out of shared
+# sstate siginfo), like the key paths below.
+QCOM_FIRMWARE_SIGN_QTI_REMOTE_ARGS[vardepvalue] = ""
+
+# Reject an unknown mode when the recipe is parsed, not deep in a task.
+python () {
+    mode = d.getVar('QCOM_FIRMWARE_SIGN_MODE')
+    if d.getVar('QCOM_FIRMWARE_SIGN_ENABLE') == '1' and mode not in ('LOCAL', 'QTI-REMOTE'):
+        bb.fatal("QCOM_FIRMWARE_SIGN_MODE must be LOCAL or QTI-REMOTE, not '%s'" % mode)
+}
+
 # OEM signing material, no defaults: set by the build configuration (see
 # ci/ecdsa-secure-boot-test-keys.yml for the CI/development test keys).
 QCOM_FIRMWARE_SIGN_ROOT_CERT ?= ""
@@ -74,6 +92,22 @@ qcom_firmware_sign_check_prereqs() {
     if [ ! -f "${QCOM_FIRMWARE_SIGN_SECPROFILE_PATH}" ]; then
         bbfatal "Security profile not found: ${QCOM_FIRMWARE_SIGN_SECPROFILE_PATH}"
     fi
+    case "${QCOM_FIRMWARE_SIGN_MODE}" in
+        LOCAL)
+            ;;
+        QTI-REMOTE)
+            if ! "${QCOM_FIRMWARE_SIGN_SECTOOLS}" secure-image --help 2>/dev/null | grep -q 'QTI-REMOTE'; then
+                bbfatal "${QCOM_FIRMWARE_SIGN_SECTOOLS} has no QTI-REMOTE signing mode: point QCOM_FIRMWARE_SIGN_SECTOOLS at a sectools build that has it."
+            fi
+            if [ "${@'1' if bb.utils.to_boolean(d.getVar('BB_NO_NETWORK')) else '0'}" = "1" ]; then
+                bbfatal "QCOM_FIRMWARE_SIGN_MODE QTI-REMOTE needs the network, but BB_NO_NETWORK is set."
+            fi
+            if [ -z "${QCOM_FIRMWARE_SIGN_QTI_REMOTE_ARGS}" ]; then
+                bbfatal "QCOM_FIRMWARE_SIGN_MODE is QTI-REMOTE but QCOM_FIRMWARE_SIGN_QTI_REMOTE_ARGS is empty: set the signing service options in the build configuration."
+            fi
+            return 0
+            ;;
+    esac
     for f in "${QCOM_FIRMWARE_SIGN_ROOT_CERT}" "${QCOM_FIRMWARE_SIGN_CA_CERT}" \
              "${QCOM_FIRMWARE_SIGN_CA_KEY}" "${QCOM_FIRMWARE_SIGN_ROOT_HASH}"; do
         if [ -z "${f}" ] || [ ! -f "${f}" ]; then
@@ -81,6 +115,8 @@ qcom_firmware_sign_check_prereqs() {
         fi
     done
 }
+# Whether this build may fetch is not a property of the signed output.
+qcom_firmware_sign_check_prereqs[vardepsexclude] += "BB_NO_NETWORK"
 
 # Print the sectools image id for the firmware filename $1, or nothing if
 # it is not in QCOM_FIRMWARE_SIGN_IMAGE_ID_MAP.  The names in the map are
@@ -134,18 +170,24 @@ qcom_sign_only_file() {
         return 0
     fi
 
-    bbnote "sectools sign ${file_name} as ${image_id}"
+    if [ "${QCOM_FIRMWARE_SIGN_MODE}" = "QTI-REMOTE" ]; then
+        set -- --qti --signing-mode QTI-REMOTE ${QCOM_FIRMWARE_SIGN_QTI_REMOTE_ARGS}
+    else
+        set -- --signing-mode LOCAL \
+            --root-certificate-index 0 \
+            --root-certificate="${QCOM_FIRMWARE_SIGN_ROOT_CERT}" \
+            --ca-certificate="${QCOM_FIRMWARE_SIGN_CA_CERT}" \
+            --ca-key="${QCOM_FIRMWARE_SIGN_CA_KEY}"
+    fi
+
+    bbnote "sectools sign ${file_name} as ${image_id} (${QCOM_FIRMWARE_SIGN_MODE})"
     pre_sha="$(sha256sum "${file_path}" | cut -d' ' -f1)"
     "${QCOM_FIRMWARE_SIGN_SECTOOLS}" secure-image \
         --sign "${file_path}" \
         --image-id="${image_id}" \
         --security-profile "${QCOM_FIRMWARE_SIGN_SECPROFILE_PATH}" \
         --anti-rollback-version="${QCOM_FIRMWARE_SIGN_ANTI_ROLLBACK}" \
-        --signing-mode LOCAL \
-        --root-certificate-index 0 \
-        --root-certificate="${QCOM_FIRMWARE_SIGN_ROOT_CERT}" \
-        --ca-certificate="${QCOM_FIRMWARE_SIGN_CA_CERT}" \
-        --ca-key="${QCOM_FIRMWARE_SIGN_CA_KEY}" \
+        "$@" \
         --outfile "${file_path}" \
         || bbfatal "Signing ${file_name} failed"
 
@@ -183,6 +225,14 @@ qcom_sign_verify_file() {
     # would fail with a confusing "infile is not signed by OEM" error.
     if [ "${pre_sha}" = "${post_sha}" ]; then
         bbdebug 1 "${file_name}: unchanged after sign attempt, skipping verify-root"
+        return 0
+    fi
+
+    if [ "${QCOM_FIRMWARE_SIGN_MODE}" = "QTI-REMOTE" ]; then
+        "${QCOM_FIRMWARE_SIGN_SECTOOLS}" secure-image "${file_path}" --validate --qti \
+            --image-id="$(qcom_sign_lookup_image_id "${file_name}")" \
+            --security-profile "${QCOM_FIRMWARE_SIGN_SECPROFILE_PATH}" \
+            || bbfatal "QTI signature validation of ${file_name} failed"
         return 0
     fi
 
