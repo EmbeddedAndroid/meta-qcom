@@ -28,6 +28,10 @@ python () {
 TFA_BUILD_TARGET = "${@bb.utils.contains('QCOM_UBOOT_SPL_FIT', '1', 'bl31', 'bl2 bl31 fip', d)}"
 TFA_SPD = "opteed"
 
+# MBN header version and image type of the signed FIP, as the SoC's XBL
+# expects it.
+QCOM_TFA_FIP_MBN ?= "-v6 aboot"
+
 EXTRA_OEMAKE:append = " \
     BL32=${RECIPE_SYSROOT}/${nonarch_base_libdir}/firmware/tee-raw.bin \
     BL33=${DEPLOY_DIR_IMAGE}/u-boot.bin \
@@ -44,7 +48,7 @@ do_install:append() {
         ${LD} ${D}${FIRMWARE_DIR}/fip.o -o ${D}${FIRMWARE_DIR}/fip_unsigned.elf -EL -T ${S}/tools/qti/fip-elf.lds --defsym=ELFENTRY=${FIP_ELF_ADDR} -Ttext=${FIP_ELF_ADDR}
         rm -f ${D}${FIRMWARE_DIR}/fip.o
 
-        qtestsign -v6 aboot -o ${D}${FIRMWARE_DIR}/fip.elf ${D}${FIRMWARE_DIR}/fip_unsigned.elf
+        qtestsign ${QCOM_TFA_FIP_MBN} -o ${D}${FIRMWARE_DIR}/fip.elf ${D}${FIRMWARE_DIR}/fip_unsigned.elf
         rm -f ${D}${FIRMWARE_DIR}/fip_unsigned.elf
 
         bl2_elf=${D}${FIRMWARE_DIR}/bl2.elf
