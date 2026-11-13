@@ -40,6 +40,10 @@ Set `QCOM_FIRMWARE_SIGN_MODE` per recipe, not globally: the qcomflash
 VIP table is OEM signed, so with signing on a global non-LOCAL mode
 makes every image fail to parse.
 
+`QCOM_FIRMWARE_SIGN_PLATFORM_BINDING` passes `--platform-binding` to
+sectools in either mode (for example `SOC-HW-VER`), for SoCs whose boot
+chain checks the binding of the signed image.
+
 Signing can be enabled for a single recipe with a `:pn-` override, which
 keeps the other firmware recipes untouched. For example, to have a TF-A
 recipe that sets `QCOM_FIRMWARE_SIGN_MODE = "QTI-REMOTE"` sign its BL2:

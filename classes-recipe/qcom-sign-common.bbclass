@@ -45,6 +45,10 @@ python () {
         bb.fatal("QCOM_FIRMWARE_SIGN_MODE must be LOCAL or QTI-REMOTE, not '%s'" % mode)
 }
 
+# Optional sectools --platform-binding value (e.g. SOC-HW-VER) for SoCs
+# whose boot chain checks it.
+QCOM_FIRMWARE_SIGN_PLATFORM_BINDING ??= ""
+
 # OEM signing material, no defaults: set by the build configuration (see
 # ci/ecdsa-secure-boot-test-keys.yml for the CI/development test keys).
 QCOM_FIRMWARE_SIGN_ROOT_CERT ?= ""
@@ -178,6 +182,9 @@ qcom_sign_only_file() {
             --root-certificate="${QCOM_FIRMWARE_SIGN_ROOT_CERT}" \
             --ca-certificate="${QCOM_FIRMWARE_SIGN_CA_CERT}" \
             --ca-key="${QCOM_FIRMWARE_SIGN_CA_KEY}"
+    fi
+    if [ -n "${QCOM_FIRMWARE_SIGN_PLATFORM_BINDING}" ]; then
+        set -- "$@" --platform-binding "${QCOM_FIRMWARE_SIGN_PLATFORM_BINDING}"
     fi
 
     bbnote "sectools sign ${file_name} as ${image_id} (${QCOM_FIRMWARE_SIGN_MODE})"
