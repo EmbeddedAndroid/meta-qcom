@@ -69,3 +69,37 @@ Make sure that ModemManager is not running, disable it if necessary.
    HELLO version: 0x2 compatible: 0x1 max_len: 1024 mode: 0
    READ64 image: 13 offset: 0x0 length: 0x40
    ```
+
+## Open boot firmware on Eliza
+
+Machines with open boot firmware (`*-open-fw`) replace `tz.mbn` and
+`uefi.elf` of the qcomflash image with TF-A BL2 and a FIP holding BL31,
+OP-TEE and U-Boot. On Eliza (`eliza-evk-emmc-open-fw`) XBL authenticates
+the TZ image against the Qualcomm test root of trust even when secure boot
+is disabled, so the test-signed `bl2.mbn` the build puts in the qcomflash
+image as `tz.mbn` is rejected and the board does not boot. XBL then stops
+right after loading it and enters its crash dump path:
+
+```text
+B -   1840919 - QSEE -  Image Load, Start
+B -   1851441 - Error code ae000065 at boot_seclib_s.c Line 128
+B -   1920920 - sbl_error_handler: copied boot regions to crash dump region
+```
+
+Sign BL2 in the build instead: enable `qcom-firmware-sign` for the TF-A
+recipe, which signs BL2 through a Qualcomm signing service (QTI-REMOTE
+mode, see [firmware-signing.md](firmware-signing.md)). The Eliza TZ
+Security Profile is not part of security-profiles-native and the
+sectools it installs has no QTI-REMOTE mode; point the recipe at a local
+copy of each, and put the signing service options in the build
+configuration:
+
+```
+QCOM_FIRMWARE_SIGN_ENABLE:pn-trusted-firmware-a-qcom-eliza = "1"
+QCOM_FIRMWARE_SIGN_SECPROFILE:pn-trusted-firmware-a-qcom-eliza = "/path/to/eliza_tz_security_profile.xml"
+QCOM_FIRMWARE_SIGN_SECTOOLS:pn-trusted-firmware-a-qcom-eliza = "/path/to/sectools"
+QCOM_FIRMWARE_SIGN_QTI_REMOTE_ARGS = "..."
+```
+
+The qcomflash image then carries the signed BL2 as `tz.mbn`. The FIP in
+`uefi.elf` is test signed by the build and needs no further signing.
