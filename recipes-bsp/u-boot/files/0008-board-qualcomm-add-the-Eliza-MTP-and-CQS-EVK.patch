@@ -1,0 +1,111 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Date: Thu, 29 Oct 2026 14:55:32 -0400
+Subject: [PATCH] board: qualcomm: add the Eliza MTP and CQS EVK
+
+The Eliza MTP and the Eliza CQS EVK can boot with TF-A and OP-TEE in
+place of the vendor UEFI firmware, with U-Boot as BL33. TF-A passes
+U-Boot no device tree, so the board's device tree is built in, selected
+with DEVICE_TREE= on the make command line as for the other TF-A
+boards; everything else the boards need is enabled by qcom_defconfig
+and tfa-optee.config.
+
+Document how to build and boot both boards, add a debug-eliza.config
+fragment for the early debug UART as other Snapdragon SoCs have, and
+add a maintainer entry for Eliza.
+
+[port: this base's board/qualcomm/tfa-optee.config does not enable
+ OPTEE_LIB; a standalone build for OP-TEE needs CONFIG_OPTEE_LIB=y as
+ well (the meta-qcom recipe's tfa-optee.cfg sets it)]
+
+Signed-off-by: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Upstream-Status: Pending
+---
+ board/qualcomm/MAINTAINERS        |  5 +++++
+ board/qualcomm/debug-eliza.config |  5 +++++
+ doc/board/qualcomm/eliza.rst      | 35 +++++++++++++++++++++++++++++++
+ doc/board/qualcomm/index.rst      |  1 +
+ 4 files changed, 46 insertions(+)
+ create mode 100644 board/qualcomm/debug-eliza.config
+ create mode 100644 doc/board/qualcomm/eliza.rst
+
+diff --git a/board/qualcomm/MAINTAINERS b/board/qualcomm/MAINTAINERS
+index f8cd20ee60a..45f96d26053 100644
+--- a/board/qualcomm/MAINTAINERS
++++ b/board/qualcomm/MAINTAINERS
+@@ -27,3 +27,8 @@ QUALCOMM DRAGONWING QCS9100
+ M:	Varadarajan Narayanan <quic_varada@quicinc.com>
+ S:	Maintained
+ N:	qcs9100
++
++QUALCOMM ELIZA
++M:	Tyler Baker <tyler.baker@oss.qualcomm.com>
++S:	Maintained
++N:	eliza
+diff --git a/board/qualcomm/debug-eliza.config b/board/qualcomm/debug-eliza.config
+new file mode 100644
+index 00000000000..b59ddc5e9a1
+--- /dev/null
++++ b/board/qualcomm/debug-eliza.config
+@@ -0,0 +1,5 @@
++CONFIG_DEBUG_UART=y
++CONFIG_DEBUG_UART_ANNOUNCE=y
++CONFIG_DEBUG_UART_BASE=0x894000
++CONFIG_DEBUG_UART_MSM_GENI=y
++CONFIG_DEBUG_UART_CLOCK=14745600
+diff --git a/doc/board/qualcomm/eliza.rst b/doc/board/qualcomm/eliza.rst
+new file mode 100644
+index 00000000000..59d6d652642
+--- /dev/null
++++ b/doc/board/qualcomm/eliza.rst
+@@ -0,0 +1,35 @@
++.. SPDX-License-Identifier: GPL-2.0+
++.. sectionauthor:: Tyler Baker <tyler.baker@oss.qualcomm.com>
++
++Qualcomm Eliza MTP and CQS EVK
++==============================
++
++The Eliza MTP is the reference design for the Qualcomm Eliza (SM7750) SoC.
++It boots from UFS. The Eliza CQS EVK (CQ7790S SoM on the EVK carrier board)
++boots from eMMC.
++
++On these boards U-Boot runs as BL33 of TF-A, with OP-TEE as BL32, instead of
++the vendor UEFI firmware. This needs the Eliza ports of TF-A (platform
++``eliza_mtp``, used for both boards) and OP-TEE (``PLATFORM=qcom-eliza``).
++TF-A loads U-Boot from its FIP and passes it no device tree, so U-Boot uses
++its built-in device tree: ``qcom/eliza-mtp`` for the MTP,
++``qcom/eliza-cqs-evk`` for the EVK.
++
++Building
++--------
++
++Configure with ``qcom_defconfig`` and the ``tfa-optee.config`` fragment, and
++select the device tree on the command line (``DEVICE_TREE=qcom/eliza-cqs-evk``
++for the EVK)::
++
++  $ make CROSS_COMPILE=aarch64-linux-gnu- O=.output qcom_defconfig tfa-optee.config
++  $ make CROSS_COMPILE=aarch64-linux-gnu- O=.output -j$(nproc) DEVICE_TREE=qcom/eliza-mtp
++
++Use ``.output/u-boot.bin`` as the BL33 image when building the TF-A FIP.
++Add ``debug-eliza.config`` for the early debug UART on QUPv3 wrap 2 SE5.
++
++Booting
++-------
++
++U-Boot boots the OS through UEFI from the EFI system partition, on UFS on
++the MTP and on eMMC on the EVK. The EVK's SD card slot is not supported.
+diff --git a/doc/board/qualcomm/index.rst b/doc/board/qualcomm/index.rst
+index 5ef4be8483f..69d4efbe703 100644
+--- a/doc/board/qualcomm/index.rst
++++ b/doc/board/qualcomm/index.rst
+@@ -10,6 +10,7 @@ Qualcomm
+    debugging
+    dragonboard410c
+    dragonwing
++   eliza
+    rb3gen2
+    iq8
+    phones
+-- 
+2.43.0
+

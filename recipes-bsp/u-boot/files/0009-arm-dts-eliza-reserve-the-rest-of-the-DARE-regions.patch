@@ -1,0 +1,82 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Date: Tue, 10 Nov 2026 18:47:44 -0500
+Subject: [PATCH] arm: dts: eliza: reserve the rest of the DARE regions
+
+The Eliza boot firmware protects two DDR regions for the hypervisor
+and TZ, 0x80000000-0x81960000 and 0xd8000000-0xdb800000; neither is OS
+memory. eliza.dtsi reserves only their first parts (gunyah-hyp,
+cpusys-vm and cpucp up to 0x81300000, tz-merged up to 0xd8600000), and
+leaves 0x81300000-0x81960000, which holds the hypervisor tag storage,
+and 0xd8600000-0xdb800000 undescribed.
+
+U-Boot takes the DDR banks from SMEM and the reservations from the
+device tree, so it maps both ranges as RAM and hands them to the OS.
+
+Reserve both as no-map in a U-Boot device tree fragment shared by the
+MTP and the CQS EVK, until the Linux eliza.dtsi describes them and that
+reaches dts/upstream. This protects the OS only when it boots with
+U-Boot's device tree: a DTB loaded from the ESP needs the same nodes.
+
+Signed-off-by: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Upstream-Status: Pending
+---
+ arch/arm/dts/eliza-cqs-evk-u-boot.dtsi |  6 ++++++
+ arch/arm/dts/eliza-mtp-u-boot.dtsi     |  6 ++++++
+ arch/arm/dts/eliza-u-boot.dtsi         | 18 ++++++++++++++++++
+ 3 files changed, 30 insertions(+)
+ create mode 100644 arch/arm/dts/eliza-cqs-evk-u-boot.dtsi
+ create mode 100644 arch/arm/dts/eliza-mtp-u-boot.dtsi
+ create mode 100644 arch/arm/dts/eliza-u-boot.dtsi
+
+diff --git a/arch/arm/dts/eliza-cqs-evk-u-boot.dtsi b/arch/arm/dts/eliza-cqs-evk-u-boot.dtsi
+new file mode 100644
+index 00000000000..536a741430f
+--- /dev/null
++++ b/arch/arm/dts/eliza-cqs-evk-u-boot.dtsi
+@@ -0,0 +1,6 @@
++// SPDX-License-Identifier: BSD-3-Clause
++/*
++ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
++ */
++
++#include "eliza-u-boot.dtsi"
+diff --git a/arch/arm/dts/eliza-mtp-u-boot.dtsi b/arch/arm/dts/eliza-mtp-u-boot.dtsi
+new file mode 100644
+index 00000000000..536a741430f
+--- /dev/null
++++ b/arch/arm/dts/eliza-mtp-u-boot.dtsi
+@@ -0,0 +1,6 @@
++// SPDX-License-Identifier: BSD-3-Clause
++/*
++ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
++ */
++
++#include "eliza-u-boot.dtsi"
+diff --git a/arch/arm/dts/eliza-u-boot.dtsi b/arch/arm/dts/eliza-u-boot.dtsi
+new file mode 100644
+index 00000000000..1c96428bb1c
+--- /dev/null
++++ b/arch/arm/dts/eliza-u-boot.dtsi
+@@ -0,0 +1,18 @@
++// SPDX-License-Identifier: BSD-3-Clause
++/*
++ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
++ */
++
++/ {
++	reserved-memory {
++		dare-hyp@81300000 {
++			reg = <0x0 0x81300000 0x0 0x660000>;
++			no-map;
++		};
++
++		dare-tz@d8600000 {
++			reg = <0x0 0xd8600000 0x0 0x3200000>;
++			no-map;
++		};
++	};
++};
+-- 
+2.43.0
+

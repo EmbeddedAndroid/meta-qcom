@@ -1,0 +1,63 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Date: Thu, 29 Oct 2026 14:55:32 -0400
+Subject: [PATCH] clk: qcom: rpmh: add Eliza
+
+The Eliza device tree feeds the XO reference of the GCC, the TCSR, the
+UFS PHY and the USB controller, and the UFS reference clock, from the
+RPMh clock controller, whose clocks the boot firmware leaves running.
+Without a driver for "qcom,eliza-rpmh-clk" none of these consumers
+probe.
+
+Register the compatible in the shared RPMh clock driver with the rate
+data of SM8550, which has the same 76.8 MHz board XO, list Eliza in its
+help text, and have CLK_QCOM_ELIZA select it.
+
+Signed-off-by: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Upstream-Status: Pending
+---
+ drivers/clk/qcom/Kconfig      | 8 +++++---
+ drivers/clk/qcom/clock-rpmh.c | 1 +
+ 2 files changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/clk/qcom/Kconfig b/drivers/clk/qcom/Kconfig
+index 329d185ff95..d29c801ae37 100644
+--- a/drivers/clk/qcom/Kconfig
++++ b/drivers/clk/qcom/Kconfig
+@@ -47,6 +47,7 @@ config SPL_CLK_QCOM_APQ8096
+ config CLK_QCOM_ELIZA
+ 	bool "Qualcomm Eliza GCC"
+ 	select CLK_QCOM
++	select CLK_QCOM_RPMH
+ 	help
+ 	  Say Y here to enable support for the Global Clock Controller
+ 	  on the Qualcomm Eliza SoC. This driver supports the clocks,
+@@ -285,9 +286,10 @@ config CLK_QCOM_RPMH
+ 	depends on CLK
+ 	help
+ 	  Say Y here to enable support for the RPMh-managed clocks found on
+-	  SoCs such as SC7280, SM8550, SM8650 and SA8775P. These clocks are
+-	  owned by the always-on subsystem; the driver only reports the fixed
+-	  CXO rate (bi_tcxo_div2) and accepts no-op enable/set_rate requests.
++	  SoCs such as Eliza, SC7280, SM8550, SM8650 and SA8775P. These
++	  clocks are owned by the always-on subsystem; the driver only reports
++	  the fixed CXO rate (bi_tcxo_div2) and accepts no-op enable/set_rate
++	  requests.
+ 
+ config SPL_CLK_QCOM_RPMH
+ 	bool "Qualcomm RPMh clock driver in SPL"
+diff --git a/drivers/clk/qcom/clock-rpmh.c b/drivers/clk/qcom/clock-rpmh.c
+index 6e0ee3b3c50..17813feebe0 100644
+--- a/drivers/clk/qcom/clock-rpmh.c
++++ b/drivers/clk/qcom/clock-rpmh.c
+@@ -46,6 +46,7 @@ static struct clk_ops qcom_rpmh_clk_ops = {
+ };
+ 
+ static const struct udevice_id qcom_rpmh_clk_ids[] = {
++	{ .compatible = "qcom,eliza-rpmh-clk", .data = TCXO_DIV2_RATE },
+ 	{ .compatible = "qcom,sa8775p-rpmh-clk", .data = TCXO_DIV2_RATE },
+ 	{ .compatible = "qcom,sc7280-rpmh-clk", .data = TCXO_DIV2_RATE },
+ 	{ .compatible = "qcom,sm8550-rpmh-clk", .data = TCXO_DIV2_RATE },
+-- 
+2.43.0
+

@@ -1,0 +1,335 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Date: Thu, 29 Oct 2026 14:55:32 -0400
+Subject: [PATCH] clk: qcom: add the Eliza GCC and TCSR clock driver
+
+U-Boot has no clock driver for the Eliza Global Clock Controller, so on
+Eliza boards the GENI serial engines, the UFS host and PHY, the eMMC
+controller and the USB controller cannot be clocked, and U-Boot reaches
+neither its console nor its boot disk (UFS on the MTP, eMMC on SDCC1 on
+the CQS EVK).
+
+Add one for the GCC and the TCSR clocks these blocks use, from the
+Linux gcc-eliza and tcsrcc-eliza drivers, and enable it in
+qcom_defconfig. The SDCC1 apps RCG only takes the XO and GPLL0 entries
+of the Linux table: U-Boot does not set up GPLL8, so its fastest rate
+is 100 MHz. U-Boot does not vote for a CX level, so the rates it sets
+rely on the level the boot firmware leaves in place.
+
+[port: this base has the SPL clock Kconfig split, the PHASE_ Makefile
+ rule and no GDSC flags field in struct qcom_power_map: Kconfig and
+ Makefile follow the base, and the POLL_CFG_GDSCR and RETAIN_FF_ENABLE
+ flags are dropped]
+
+[port: the SD card controller reset GCC_SDCC2_BCR (0x14000, as in
+ Linux gcc-eliza.c) is in the reset table: the eliza-cqs-evk sdhc_2
+ node probes, and this base has no check for resets missing from the
+ table, so leaving it out would pulse offset 0, the GPLL0 mode
+ register]
+
+Signed-off-by: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Upstream-Status: Pending
+---
+ configs/qcom_defconfig         |   1 +
+ drivers/clk/qcom/Kconfig       |   9 ++
+ drivers/clk/qcom/Makefile      |   1 +
+ drivers/clk/qcom/clock-eliza.c | 243 +++++++++++++++++++++++++++++++++
+ 4 files changed, 254 insertions(+)
+ create mode 100644 drivers/clk/qcom/clock-eliza.c
+
+diff --git a/configs/qcom_defconfig b/configs/qcom_defconfig
+index 6c9185fdf8e..91ccdf0a880 100644
+--- a/configs/qcom_defconfig
++++ b/configs/qcom_defconfig
+@@ -64,6 +64,7 @@ CONFIG_CLK=y
+ CONFIG_CLK_STUB=y
+ CONFIG_CLK_QCOM_APQ8016=y
+ CONFIG_CLK_QCOM_APQ8096=y
++CONFIG_CLK_QCOM_ELIZA=y
+ CONFIG_CLK_QCOM_MILOS=y
+ CONFIG_CLK_QCOM_NORD=y
+ CONFIG_CLK_QCOM_NORD_NEGCC=y
+diff --git a/drivers/clk/qcom/Kconfig b/drivers/clk/qcom/Kconfig
+index 65e12593d16..329d185ff95 100644
+--- a/drivers/clk/qcom/Kconfig
++++ b/drivers/clk/qcom/Kconfig
+@@ -44,6 +44,15 @@ config SPL_CLK_QCOM_APQ8096
+ 	  SPL variant of CLK_QCOM_APQ8096.
+ 	  See the help of CLK_QCOM_APQ8096 for details.
+ 
++config CLK_QCOM_ELIZA
++	bool "Qualcomm Eliza GCC"
++	select CLK_QCOM
++	help
++	  Say Y here to enable support for the Global Clock Controller
++	  on the Qualcomm Eliza SoC. This driver supports the clocks,
++	  resets and power domains exposed by the GCC hardware block, and
++	  the TCSR reference clock enables.
++
+ config CLK_QCOM_IPQ4019
+ 	bool "Qualcomm IPQ4019 GCC"
+ 	select CLK_QCOM
+diff --git a/drivers/clk/qcom/Makefile b/drivers/clk/qcom/Makefile
+index 1ab421ca52d..d7a61f25338 100644
+--- a/drivers/clk/qcom/Makefile
++++ b/drivers/clk/qcom/Makefile
+@@ -6,6 +6,7 @@ obj-y += clock-qcom.o
+ obj-$(CONFIG_$(PHASE_)CLK_QCOM_SDM845) += clock-sdm845.o
+ obj-$(CONFIG_$(PHASE_)CLK_QCOM_APQ8016) += clock-apq8016.o
+ obj-$(CONFIG_$(PHASE_)CLK_QCOM_APQ8096) += clock-apq8096.o
++obj-$(CONFIG_$(PHASE_)CLK_QCOM_ELIZA) += clock-eliza.o
+ obj-$(CONFIG_$(PHASE_)CLK_QCOM_IPQ4019) += clock-ipq4019.o
+ obj-$(CONFIG_$(PHASE_)CLK_QCOM_IPQ5210) += clock-ipq5210.o
+ obj-$(CONFIG_$(PHASE_)CLK_QCOM_IPQ5424) += clock-ipq5424.o
+diff --git a/drivers/clk/qcom/clock-eliza.c b/drivers/clk/qcom/clock-eliza.c
+new file mode 100644
+index 00000000000..73f536afaf8
+--- /dev/null
++++ b/drivers/clk/qcom/clock-eliza.c
+@@ -0,0 +1,243 @@
++// SPDX-License-Identifier: BSD-3-Clause
++/*
++ * Clock drivers for Qualcomm Eliza
++ *
++ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
++ *
++ * Register data from the Linux gcc-eliza and tcsrcc-eliza drivers.
++ */
++
++#include <clk-uclass.h>
++#include <dm.h>
++#include <linux/bitops.h>
++#include <dt-bindings/clock/qcom,eliza-gcc.h>
++#include <dt-bindings/clock/qcom,eliza-tcsr.h>
++
++#include "clock-qcom.h"
++
++/* RPMh CXO: the 76.8 MHz board XO divided by two */
++#define TCXO_RATE	38400000
++
++/* bi_tcxo_div2, the GCC reference */
++#define TCXO_DIV2_RATE	(TCXO_RATE / 2)
++
++static const struct freq_tbl ftbl_gcc_qupv3_wrap2_s5_clk_src[] = {
++	F(7372800, CFG_CLK_SRC_GPLL0_EVEN, 1, 384, 15625),
++	F(14745600, CFG_CLK_SRC_GPLL0_EVEN, 1, 768, 15625),
++	F(19200000, CFG_CLK_SRC_CXO, 1, 0, 0),
++	F(29491200, CFG_CLK_SRC_GPLL0_EVEN, 1, 1536, 15625),
++	F(32000000, CFG_CLK_SRC_GPLL0_EVEN, 1, 8, 75),
++	F(48000000, CFG_CLK_SRC_GPLL0_EVEN, 1, 4, 25),
++	F(64000000, CFG_CLK_SRC_GPLL0_EVEN, 1, 16, 75),
++	F(80000000, CFG_CLK_SRC_GPLL0_EVEN, 1, 4, 15),
++	F(96000000, CFG_CLK_SRC_GPLL0_EVEN, 1, 8, 25),
++	F(100000000, CFG_CLK_SRC_GPLL0, 6, 0, 0),
++	{ }
++};
++
++static const struct freq_tbl ftbl_gcc_usb30_prim_master_clk_src[] = {
++	F(66666667, CFG_CLK_SRC_GPLL0_EVEN, 4.5, 0, 0),
++	F(133333333, CFG_CLK_SRC_GPLL0, 4.5, 0, 0),
++	F(200000000, CFG_CLK_SRC_GPLL0, 3, 0, 0),
++	F(240000000, CFG_CLK_SRC_GPLL0, 2.5, 0, 0),
++	{ }
++};
++
++/* GPLL0 even and XO entries of the Linux table: GPLL8 is not set up in U-Boot */
++static const struct freq_tbl ftbl_gcc_sdcc1_apps_clk_src[] = {
++	F(144000, CFG_CLK_SRC_CXO, 16, 3, 25),
++	F(400000, CFG_CLK_SRC_CXO, 12, 1, 4),
++	F(20000000, CFG_CLK_SRC_GPLL0_EVEN, 5, 1, 3),
++	F(25000000, CFG_CLK_SRC_GPLL0_EVEN, 12, 0, 0),
++	F(50000000, CFG_CLK_SRC_GPLL0_EVEN, 6, 0, 0),
++	F(100000000, CFG_CLK_SRC_GPLL0_EVEN, 3, 0, 0),
++	{ }
++};
++
++static ulong eliza_set_rate(struct clk *clk, ulong rate)
++{
++	struct msm_clk_priv *priv = dev_get_priv(clk->dev);
++	const struct freq_tbl *freq;
++
++	switch (clk->id) {
++	case GCC_QUPV3_WRAP2_S5_CLK: /* UART13 */
++		freq = qcom_find_freq(ftbl_gcc_qupv3_wrap2_s5_clk_src, rate);
++		clk_rcg_set_rate_mnd(priv->base, 0x1e640,
++				     freq->pre_div, freq->m, freq->n, freq->src, 16);
++		return freq->freq;
++	case GCC_USB30_PRIM_MASTER_CLK:
++		freq = qcom_find_freq(ftbl_gcc_usb30_prim_master_clk_src, rate);
++		clk_rcg_set_rate_mnd(priv->base, 0x39030,
++				     freq->pre_div, freq->m, freq->n, freq->src, 8);
++		return freq->freq;
++	case GCC_SDCC1_APPS_CLK:
++		freq = qcom_find_freq(ftbl_gcc_sdcc1_apps_clk_src, rate);
++		clk_rcg_set_rate_mnd(priv->base, 0xa9018,
++				     freq->pre_div, freq->m, freq->n, freq->src, 8);
++		return freq->freq;
++	case GCC_USB30_PRIM_MOCK_UTMI_CLK:
++		clk_rcg_set_rate(priv->base, 0x39048, 0, CFG_CLK_SRC_CXO);
++		return TCXO_DIV2_RATE;
++	default:
++		return 0;
++	}
++}
++
++static const struct gate_clk eliza_clks[] = {
++	GATE_CLK_POLLED(GCC_AGGRE_UFS_PHY_AXI_CLK,	0x770f4, BIT(0), 0x770f4),
++	GATE_CLK_POLLED(GCC_AGGRE_USB3_PRIM_AXI_CLK,	0x39094, BIT(0), 0x39094),
++	GATE_CLK_POLLED(GCC_CFG_NOC_USB3_PRIM_AXI_CLK,	0x39090, BIT(0), 0x39090),
++	GATE_CLK_POLLED(GCC_QUPV3_WRAP1_S0_CLK,		0x52008, BIT(22), 0x18004),
++	GATE_CLK_POLLED(GCC_QUPV3_WRAP1_S1_CLK,		0x52008, BIT(23), 0x18140),
++	GATE_CLK_POLLED(GCC_QUPV3_WRAP1_S2_CLK,		0x52008, BIT(24), 0x1827c),
++	GATE_CLK_POLLED(GCC_QUPV3_WRAP1_S3_CLK,		0x52008, BIT(25), 0x18290),
++	GATE_CLK_POLLED(GCC_QUPV3_WRAP1_S4_CLK,		0x52008, BIT(26), 0x183cc),
++	GATE_CLK_POLLED(GCC_QUPV3_WRAP1_S5_CLK,		0x52008, BIT(27), 0x18508),
++	GATE_CLK_POLLED(GCC_QUPV3_WRAP1_S6_CLK,		0x52008, BIT(28), 0x18644),
++	GATE_CLK_POLLED(GCC_QUPV3_WRAP1_S7_CLK,		0x52010, BIT(16), 0x18780),
++	GATE_CLK_POLLED(GCC_QUPV3_WRAP2_S0_CLK,		0x52010, BIT(4), 0x1e004),
++	GATE_CLK_POLLED(GCC_QUPV3_WRAP2_S1_CLK,		0x52010, BIT(5), 0x1e140),
++	GATE_CLK_POLLED(GCC_QUPV3_WRAP2_S2_CLK,		0x52010, BIT(6), 0x1e27c),
++	GATE_CLK_POLLED(GCC_QUPV3_WRAP2_S3_CLK,		0x52010, BIT(7), 0x1e3b8),
++	GATE_CLK_POLLED(GCC_QUPV3_WRAP2_S4_CLK,		0x52010, BIT(8), 0x1e4f4),
++	GATE_CLK_POLLED(GCC_QUPV3_WRAP2_S5_CLK,		0x52010, BIT(9), 0x1e630),
++	GATE_CLK_POLLED(GCC_QUPV3_WRAP2_S6_CLK,		0x52010, BIT(10), 0x1e76c),
++	GATE_CLK_POLLED(GCC_QUPV3_WRAP2_S7_CLK,		0x52010, BIT(17), 0x1e8a8),
++	GATE_CLK_POLLED(GCC_QUPV3_WRAP_1_M_AHB_CLK,	0x52008, BIT(20), 0x23000),
++	GATE_CLK_POLLED(GCC_QUPV3_WRAP_1_S_AHB_CLK,	0x52008, BIT(21), 0x23004),
++	GATE_CLK_POLLED(GCC_QUPV3_WRAP_2_M_AHB_CLK,	0x52010, BIT(2), 0x23158),
++	GATE_CLK_POLLED(GCC_QUPV3_WRAP_2_S_AHB_CLK,	0x52010, BIT(1), 0x2315c),
++	GATE_CLK_POLLED(GCC_SDCC1_AHB_CLK,		0xa9004, BIT(0), 0xa9004),
++	GATE_CLK_POLLED(GCC_SDCC1_APPS_CLK,		0xa9008, BIT(0), 0xa9008),
++	GATE_CLK_POLLED(GCC_UFS_PHY_AHB_CLK,		0x77028, BIT(0), 0x77028),
++	GATE_CLK_POLLED(GCC_UFS_PHY_AXI_CLK,		0x77018, BIT(0), 0x77018),
++	GATE_CLK_POLLED(GCC_UFS_PHY_PHY_AUX_CLK,	0x770bc, BIT(0), 0x770bc),
++	GATE_CLK(GCC_UFS_PHY_RX_SYMBOL_0_CLK,		0x77030, BIT(0)),
++	GATE_CLK(GCC_UFS_PHY_RX_SYMBOL_1_CLK,		0x770d8, BIT(0)),
++	GATE_CLK(GCC_UFS_PHY_TX_SYMBOL_0_CLK,		0x7702c, BIT(0)),
++	GATE_CLK_POLLED(GCC_UFS_PHY_UNIPRO_CORE_CLK,	0x7706c, BIT(0), 0x7706c),
++	GATE_CLK_POLLED(GCC_USB30_PRIM_MASTER_CLK,	0x39018, BIT(0), 0x39018),
++	GATE_CLK_POLLED(GCC_USB30_PRIM_MOCK_UTMI_CLK,	0x3902c, BIT(0), 0x3902c),
++	GATE_CLK_POLLED(GCC_USB30_PRIM_SLEEP_CLK,	0x39028, BIT(0), 0x39028),
++	GATE_CLK(GCC_USB3_PRIM_PHY_AUX_CLK,		0x39064, BIT(0)),
++	GATE_CLK(GCC_USB3_PRIM_PHY_COM_AUX_CLK,		0x39068, BIT(0)),
++};
++
++static int eliza_enable(struct clk *clk)
++{
++	struct msm_clk_priv *priv = dev_get_priv(clk->dev);
++
++	/* No U-Boot driver handles the USB 3 PHY: enable its aux clocks, as SM8650 does */
++	switch (clk->id) {
++	case GCC_AGGRE_USB3_PRIM_AXI_CLK:
++		qcom_gate_clk_en(priv, GCC_USB30_PRIM_MASTER_CLK);
++		fallthrough;
++	case GCC_USB30_PRIM_MASTER_CLK:
++		qcom_gate_clk_en(priv, GCC_USB3_PRIM_PHY_AUX_CLK);
++		qcom_gate_clk_en(priv, GCC_USB3_PRIM_PHY_COM_AUX_CLK);
++		break;
++	}
++
++	return qcom_gate_clk_en(priv, clk->id);
++}
++
++static const struct qcom_reset_map eliza_gcc_resets[] = {
++	[GCC_QUSB2PHY_PRIM_BCR] = { 0x12000 },
++	[GCC_SDCC1_BCR] = { 0xa9000 },
++	[GCC_SDCC2_BCR] = { 0x14000 },
++	[GCC_UFS_PHY_BCR] = { 0x77000 },
++	[GCC_USB30_PRIM_BCR] = { 0x39000 },
++};
++
++static const struct qcom_power_map eliza_gdscs[] = {
++	[GCC_UFS_MEM_PHY_GDSC] = { 0x9e000 },
++	[GCC_UFS_PHY_GDSC] = { 0x77004 },
++	[GCC_USB30_PRIM_GDSC] = { 0x39004 },
++};
++
++static struct msm_clk_data eliza_gcc_data = {
++	.resets = eliza_gcc_resets,
++	.num_resets = ARRAY_SIZE(eliza_gcc_resets),
++	.clks = eliza_clks,
++	.num_clks = ARRAY_SIZE(eliza_clks),
++	.power_domains = eliza_gdscs,
++	.num_power_domains = ARRAY_SIZE(eliza_gdscs),
++
++	.enable = eliza_enable,
++	.set_rate = eliza_set_rate,
++};
++
++static const struct udevice_id gcc_eliza_of_match[] = {
++	{
++		.compatible = "qcom,eliza-gcc",
++		.data = (ulong)&eliza_gcc_data,
++	},
++	{ }
++};
++
++U_BOOT_DRIVER(gcc_eliza) = {
++	.name		= "gcc_eliza",
++	.id		= UCLASS_NOP,
++	.of_match	= gcc_eliza_of_match,
++	.bind		= qcom_cc_bind,
++	.flags		= DM_FLAG_PRE_RELOC | DM_FLAG_DEFAULT_PD_CTRL_OFF,
++};
++
++/* TCSRCC */
++
++static const struct gate_clk eliza_tcsr_clks[] = {
++	GATE_CLK(TCSR_USB2_CLKREF_EN,		0x4, BIT(0)),
++};
++
++static struct msm_clk_data eliza_tcsrcc_data = {
++	.clks = eliza_tcsr_clks,
++	.num_clks = ARRAY_SIZE(eliza_tcsr_clks),
++};
++
++static int tcsrcc_eliza_clk_enable(struct clk *clk)
++{
++	struct msm_clk_priv *priv = dev_get_priv(clk->dev);
++
++	return qcom_gate_clk_en(priv, clk->id);
++}
++
++static ulong tcsrcc_eliza_clk_get_rate(struct clk *clk)
++{
++	return TCXO_RATE;
++}
++
++static int tcsrcc_eliza_clk_probe(struct udevice *dev)
++{
++	struct msm_clk_priv *priv = dev_get_priv(dev);
++
++	priv->base = dev_read_addr(dev);
++	if (priv->base == FDT_ADDR_T_NONE)
++		return -EINVAL;
++
++	priv->data = (struct msm_clk_data *)dev_get_driver_data(dev);
++
++	return 0;
++}
++
++static struct clk_ops tcsrcc_eliza_clk_ops = {
++	.enable = tcsrcc_eliza_clk_enable,
++	.get_rate = tcsrcc_eliza_clk_get_rate,
++};
++
++static const struct udevice_id tcsrcc_eliza_of_match[] = {
++	{
++		.compatible = "qcom,eliza-tcsr",
++		.data = (ulong)&eliza_tcsrcc_data,
++	},
++	{ }
++};
++
++U_BOOT_DRIVER(tcsrcc_eliza) = {
++	.name		= "tcsrcc_eliza",
++	.id		= UCLASS_CLK,
++	.of_match	= tcsrcc_eliza_of_match,
++	.ops		= &tcsrcc_eliza_clk_ops,
++	.priv_auto	= sizeof(struct msm_clk_priv),
++	.probe		= tcsrcc_eliza_clk_probe,
++	.flags		= DM_FLAG_PRE_RELOC | DM_FLAG_DEFAULT_PD_CTRL_OFF,
++};
+-- 
+2.43.0
+

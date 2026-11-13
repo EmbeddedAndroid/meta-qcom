@@ -23,6 +23,14 @@ SRC_URI += " \
     file://0001-Add-support-for-OpenSSL-Provider-API.patch \
     file://0002-configs-qcom-re-enable-the-SoC-clock-drivers-in-SPL.patch \
     file://0003-mmc-msm_sdhci-keep-SDR12-timing-for-eMMC-high-speed.patch \
+    file://0004-dts-upstream-import-the-Eliza-device-trees-from-v7.3.patch \
+    file://0005-clk-qcom-add-the-Eliza-GCC-and-TCSR-clock-driver.patch \
+    file://0006-clk-qcom-rpmh-add-Eliza.patch \
+    file://0007-pinctrl-qcom-add-the-Eliza-pinctrl-driver.patch \
+    file://0008-board-qualcomm-add-the-Eliza-MTP-and-CQS-EVK.patch \
+    file://0009-arm-dts-eliza-reserve-the-rest-of-the-DARE-regions.patch \
+    file://0010-FROMLIST-arm64-dts-qcom-eliza-add-the-APSS-watchdog.patch \
+    file://0011-arm-dts-eliza-enable-the-APSS-watchdog.patch \
     file://disable-eficapsule-tool.cfg \
     file://efi-rt-volatile-store.cfg \
     ${@bb.utils.contains('MACHINE_FEATURES', 'optee', 'file://tfa-optee.cfg', '', d)} \

@@ -1,0 +1,154 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Date: Thu, 29 Oct 2026 14:55:32 -0400
+Subject: [PATCH] pinctrl: qcom: add the Eliza pinctrl driver
+
+The Eliza MTP resets its UFS device through the TLMM UFS_RESET pin, and
+the CQS EVK muxes its eMMC (SDCC1) onto TLMM GPIOs; both boards mux the
+console UART through the TLMM. U-Boot cannot reach the boot disk without
+a driver for it.
+
+Add a TLMM driver for Eliza: 185 GPIOs plus the UFS reset pin, with the
+functions U-Boot uses: qup2_se5 for the debug UART and sdc1 for the
+eMMC pins, so that their drive strength and bias from the DT are
+applied.
+
+[port: this base splits the pinctrl Kconfig into U-Boot and SPL entries
+ and builds with the PHASE_ Makefile rule: the Kconfig entry and
+ Makefile line follow the base]
+
+Signed-off-by: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Upstream-Status: Pending
+---
+ drivers/pinctrl/qcom/Kconfig         |  8 +++
+ drivers/pinctrl/qcom/Makefile        |  1 +
+ drivers/pinctrl/qcom/pinctrl-eliza.c | 86 ++++++++++++++++++++++++++++
+ 3 files changed, 95 insertions(+)
+ create mode 100644 drivers/pinctrl/qcom/pinctrl-eliza.c
+
+diff --git a/drivers/pinctrl/qcom/Kconfig b/drivers/pinctrl/qcom/Kconfig
+index 4777b9d0b14..2758a3e2774 100644
+--- a/drivers/pinctrl/qcom/Kconfig
++++ b/drivers/pinctrl/qcom/Kconfig
+@@ -60,6 +60,14 @@ config SPL_PINCTRL_QCOM_APQ8096
+ 	  SPL variant of PINCTRL_QCOM_APQ8096.
+ 	  See the help of PINCTRL_QCOM_APQ8096 for details.
+ 
++config PINCTRL_QCOM_ELIZA
++	bool "Qualcomm Eliza Pinctrl"
++	default y if PINCTRL_QCOM_GENERIC
++	select PINCTRL_QCOM
++	help
++	  Say Y here to enable support for pinctrl on the Qualcomm Eliza SoC,
++	  as well as the associated GPIO driver.
++
+ config PINCTRL_QCOM_IPQ4019
+ 	bool "Qualcomm IPQ4019 Pinctrl"
+ 	default y if PINCTRL_QCOM_GENERIC
+diff --git a/drivers/pinctrl/qcom/Makefile b/drivers/pinctrl/qcom/Makefile
+index a0781ab8529..9f32ed9c4c2 100644
+--- a/drivers/pinctrl/qcom/Makefile
++++ b/drivers/pinctrl/qcom/Makefile
+@@ -4,6 +4,7 @@
+ 
+ obj-$(CONFIG_$(PHASE_)PINCTRL_QCOM) += pinctrl-qcom.o
+ obj-$(CONFIG_$(PHASE_)PINCTRL_QCOM_APQ8016) += pinctrl-apq8016.o
++obj-$(CONFIG_$(PHASE_)PINCTRL_QCOM_ELIZA) += pinctrl-eliza.o
+ obj-$(CONFIG_$(PHASE_)PINCTRL_QCOM_IPQ4019) += pinctrl-ipq4019.o
+ obj-$(CONFIG_$(PHASE_)PINCTRL_QCOM_IPQ5210) += pinctrl-ipq5210.o
+ obj-$(CONFIG_$(PHASE_)PINCTRL_QCOM_IPQ5424) += pinctrl-ipq5424.o
+diff --git a/drivers/pinctrl/qcom/pinctrl-eliza.c b/drivers/pinctrl/qcom/pinctrl-eliza.c
+new file mode 100644
+index 00000000000..202d9c575e5
+--- /dev/null
++++ b/drivers/pinctrl/qcom/pinctrl-eliza.c
+@@ -0,0 +1,86 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * Qualcomm Eliza pinctrl
++ *
++ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
++ *
++ * Pin data from the Linux pinctrl-eliza driver.
++ */
++
++#include <dm.h>
++
++#include "pinctrl-qcom.h"
++
++#define MAX_PIN_NAME_LEN 32
++static char pin_name[MAX_PIN_NAME_LEN] __section(".data");
++
++static const struct pinctrl_function msm_pinctrl_functions[] = {
++	{"qup2_se5", 1},
++	{"sdc1", 1},
++	{"gpio", 0},
++};
++
++#define UFS_RESET(pg_name, ctl, io)			\
++	{					        \
++		.name = pg_name,			\
++		.ctl_reg = ctl,				\
++		.io_reg = io,				\
++		.pull_bit = 3,				\
++		.drv_bit = 0,				\
++		.oe_bit = -1,				\
++		.in_bit = -1,				\
++		.out_bit = 0,				\
++	}
++
++static const struct msm_special_pin_data msm_special_pins_data[] = {
++	[0] = UFS_RESET("ufs_reset", 0xc9004, 0xca000),
++};
++
++static const char *eliza_get_function_name(struct udevice *dev,
++					   unsigned int selector)
++{
++	return msm_pinctrl_functions[selector].name;
++}
++
++static const char *eliza_get_pin_name(struct udevice *dev,
++				      unsigned int selector)
++{
++	if (selector == 185)
++		snprintf(pin_name, MAX_PIN_NAME_LEN,
++			 msm_special_pins_data[0].name);
++	else
++		snprintf(pin_name, MAX_PIN_NAME_LEN, "gpio%u", selector);
++
++	return pin_name;
++}
++
++static int eliza_get_function_mux(__maybe_unused unsigned int pin,
++				  unsigned int selector)
++{
++	return msm_pinctrl_functions[selector].val;
++}
++
++static struct msm_pinctrl_data eliza_data = {
++	.pin_data = {
++		.pin_count = 186,
++		.special_pins_start = 185,
++		.special_pins_data = msm_special_pins_data,
++	},
++	.functions_count = ARRAY_SIZE(msm_pinctrl_functions),
++	.get_function_name = eliza_get_function_name,
++	.get_function_mux = eliza_get_function_mux,
++	.get_pin_name = eliza_get_pin_name,
++};
++
++static const struct udevice_id msm_pinctrl_ids[] = {
++	{ .compatible = "qcom,eliza-tlmm", .data = (ulong)&eliza_data },
++	{ /* Sentinel */ }
++};
++
++U_BOOT_DRIVER(pinctrl_eliza) = {
++	.name		= "pinctrl_eliza",
++	.id		= UCLASS_NOP,
++	.of_match	= msm_pinctrl_ids,
++	.ops		= &msm_pinctrl_ops,
++	.bind		= msm_pinctrl_bind,
++};
+-- 
+2.43.0
+

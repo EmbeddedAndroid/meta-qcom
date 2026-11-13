@@ -1,0 +1,61 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Date: Wed, 11 Nov 2026 12:36:17 -0500
+Subject: [PATCH] FROMLIST: arm64: dts: qcom: eliza: add the APSS watchdog
+
+XBL leaves the non-secure APSS watchdog (timer block at 0x17410000,
+bark on GIC SPI 0) running when it hands over. On the stock software
+stack Gunyah owns it and keeps it serviced; with no hypervisor nothing
+does, and it bites about 30 s after XBL hands over unless the next
+stage takes the watchdog over in time.
+
+Describe the watchdog in the Eliza DT, status "reserved" as Gunyah owns
+it when Linux runs at EL1, with the binding entry it needs.
+
+This is the Linux change (dt-bindings: watchdog: qcom-wdt: add Eliza,
+and arm64: dts: qcom: eliza: add the APSS watchdog) applied to
+dts/upstream ahead of its merge; drop this commit when dts/upstream
+syncs a Linux release that carries it. Not posted yet.
+
+Signed-off-by: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Upstream-Status: Pending
+---
+ dts/upstream/Bindings/watchdog/qcom-wdt.yaml | 1 +
+ dts/upstream/src/arm64/qcom/eliza.dtsi       | 9 +++++++++
+ 2 files changed, 10 insertions(+)
+
+diff --git a/dts/upstream/Bindings/watchdog/qcom-wdt.yaml b/dts/upstream/Bindings/watchdog/qcom-wdt.yaml
+index 9f861045b71..96eaee18281 100644
+--- a/dts/upstream/Bindings/watchdog/qcom-wdt.yaml
++++ b/dts/upstream/Bindings/watchdog/qcom-wdt.yaml
+@@ -17,6 +17,7 @@ properties:
+     oneOf:
+       - items:
+           - enum:
++              - qcom,apss-wdt-eliza
+               - qcom,apss-wdt-glymur
+               - qcom,kpss-wdt-ipq4019
+               - qcom,apss-wdt-ipq5018
+diff --git a/dts/upstream/src/arm64/qcom/eliza.dtsi b/dts/upstream/src/arm64/qcom/eliza.dtsi
+index 66ea4aaafd7..8bd88d16435 100644
+--- a/dts/upstream/src/arm64/qcom/eliza.dtsi
++++ b/dts/upstream/src/arm64/qcom/eliza.dtsi
+@@ -3688,6 +3688,15 @@
+ 			};
+ 		};
+ 
++		apss_watchdog: watchdog@17410000 {
++			compatible = "qcom,apss-wdt-eliza", "qcom,kpss-wdt";
++			reg = <0x0 0x17410000 0x0 0x1000>;
++			clocks = <&sleep_clk>;
++			interrupts = <GIC_SPI 0 IRQ_TYPE_EDGE_RISING>;
++
++			status = "reserved"; /* Reserved by Gunyah */
++		};
++
+ 		apps_rsc: rsc@17a00000 {
+ 			compatible = "qcom,rpmh-rsc";
+ 			reg = <0x0 0x17a00000 0x0 0x10000>,
+-- 
+2.43.0
+

@@ -1,0 +1,43 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Date: Wed, 11 Nov 2026 12:36:26 -0500
+Subject: [PATCH] arm: dts: eliza: enable the APSS watchdog
+
+XBL hands over with the non-secure APSS watchdog running and a 30 s
+bite. On the stock software stack the hypervisor services it; with
+U-Boot as the next stage nothing does, so the board resets about 30 s
+after U-Boot starts, at a prompt, in a fastboot session, or in an OS
+that has not taken the watchdog over by then. On the Eliza CQS EVK a
+Linux boot with memtest=4 stops in early_memtest 29 s after U-Boot
+started and comes back through a watchdog reset.
+
+The Eliza DT describes the watchdog with status "reserved". Enable it
+in the U-Boot fragment of the MTP and the CQS EVK so that the qcom_wdt
+driver probes it at init and stops it; an OS that wants it restarts it.
+With this change the same memtest=4 boot on the EVK runs to the end.
+
+Signed-off-by: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Upstream-Status: Pending
+---
+ arch/arm/dts/eliza-u-boot.dtsi | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/arch/arm/dts/eliza-u-boot.dtsi b/arch/arm/dts/eliza-u-boot.dtsi
+index 1c96428bb1c..f0edd8ccb21 100644
+--- a/arch/arm/dts/eliza-u-boot.dtsi
++++ b/arch/arm/dts/eliza-u-boot.dtsi
+@@ -16,3 +16,11 @@
+ 		};
+ 	};
+ };
++
++/*
++ * XBL leaves the APSS watchdog running with a 30 s bite and nothing
++ * services it until the OS does: let the qcom_wdt driver probe and stop it.
++ */
++&apss_watchdog {
++	status = "okay";
++};
+-- 
+2.43.0
+
