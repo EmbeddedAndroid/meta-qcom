@@ -1,0 +1,71 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Date: Wed, 4 Nov 2026 20:09:16 -0500
+Subject: [PATCH] mmc: msm_sdhci: keep SDR12 timing for eMMC high speed
+
+msm_sdhci uses the generic sdhci_set_control_reg(), which programs the
+HOST_CONTROL2 UHS mode select field with SDR25 for MMC_HS and SDR50 for
+MMC_HS_52. The Linux sdhci-msm driver programs that field only for UHS,
+HS200, HS400 and DDR timings and leaves eMMC high speed at SDR12 (0).
+
+On the Eliza CQS EVK (SDCC core version 1, minor 0x72) the eMMC is
+identified and the first EXT_CSD read after the switch to 8-bit high
+speed works, but once the host clock is raised to 52 MHz with SDR50
+selected the card's responses are missed, the card is left in the data
+state and every later command times out, so no partition can be read:
+
+  CMD_SEND:6  ARG 0x03b90100  MMC_RSP_R1b 0x0000000b
+  CMD_SEND:8  ARG 0x00000000  RET -110
+  mmc0 busy timeout
+  unable to select a mode: -70
+
+The same failure shows with a 4-bit bus and with the controller clocked
+at 50 MHz without the SDHCI divider, while legacy timing (high speed cap
+masked) reads the eMMC. With SDR12 for MMC_HS and MMC_HS_52, as Linux
+programs it, the card runs in 8-bit HS52 and U-Boot loads the OS from
+it.
+
+This applies to every msm_sdhci eMMC that ends in HS or HS52, which
+without HS200 support in qcom_defconfig is most of them. eMMCs that
+select DDR52 keep the DDR50 code, as in Linux.
+
+[port: qualcomm-linux u-boot already has sdhci_msm_set_control_reg();
+ the SDR12 case is added to it instead of a new set_control_reg op; its
+ qcom_defconfig enables HS200 and HS400, so here the change applies to
+ the eMMCs U-Boot runs at HS52, such as the Eliza CQS EVK's, where
+ HS400 and HS200 tuning fail (the DLL does not lock) and U-Boot falls
+ back to HS52]
+
+Signed-off-by: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Upstream-Status: Pending
+---
+ drivers/mmc/msm_sdhci.c | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/drivers/mmc/msm_sdhci.c b/drivers/mmc/msm_sdhci.c
+index 155bc2ef379..d5f423548c3 100644
+--- a/drivers/mmc/msm_sdhci.c
++++ b/drivers/mmc/msm_sdhci.c
+@@ -819,6 +819,19 @@ static void sdhci_msm_set_control_reg(struct sdhci_host *host)
+ 		ctrl2 &= ~SDHCI_CTRL_UHS_MASK;
+ 		ctrl2 |= SDHCI_CTRL_UHS_SDR104;
+ 		sdhci_writew(host, ctrl2, SDHCI_HOST_CONTROL2);
++	} else if (mmc->selected_mode == MMC_HS ||
++		   mmc->selected_mode == MMC_HS_52) {
++		u32 ctrl2 = sdhci_readw(host, SDHCI_HOST_CONTROL2);
++
++		/*
++		 * eMMC high speed is not a UHS mode: keep the UHS field at
++		 * SDR12, as the kernel driver does. With the SDR25/SDR50 codes
++		 * the generic code picks, the controller misses the card's
++		 * responses once the clock is raised.
++		 */
++		ctrl2 &= ~SDHCI_CTRL_UHS_MASK;
++		ctrl2 |= SDHCI_CTRL_UHS_SDR12;
++		sdhci_writew(host, ctrl2, SDHCI_HOST_CONTROL2);
+ 	} else {
+ 		sdhci_set_uhs_timing(host);
+ 	}
+-- 
+2.43.0
+
