@@ -1,0 +1,36 @@
+From 8c589b897b3be5fa3401222f4261142d95e0a414 Mon Sep 17 00:00:00 2001
+From: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Date: Fri, 30 Oct 2026 22:02:50 -0400
+Subject: [PATCH] freedreno: Fix the A722 CCU count
+
+The A722 has 2 CCUs and 2 SPs. pvtmem is sized per SP from num_ccu,
+so with 1 the second SP runs off the end of the BO and any shader
+that spills hits UCHE translation faults. The resulting hang recovery
+leaves rusticl returning stale results.
+
+Fixes: 803731f7ed4a ("freedreno: Add chip support for a722")
+Assisted-by: LLM
+Signed-off-by: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Part-of: <https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/45827>
+
+Upstream-Status: Backport [https://gitlab.freedesktop.org/mesa/mesa/-/commit/8c589b897b3be5fa3401222f4261142d95e0a414]
+---
+ src/freedreno/common/freedreno_devices.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/freedreno/common/freedreno_devices.py b/src/freedreno/common/freedreno_devices.py
+index 47e70304d5ac..63abb5ccfbb1 100644
+--- a/src/freedreno/common/freedreno_devices.py
++++ b/src/freedreno/common/freedreno_devices.py
+@@ -1122,7 +1122,7 @@ add_gpus([
+     ], A6xxGPUInfo(
+         CHIP.A7XX,
+         [a7xx_base, a7xx_gen1],
+-        num_ccu = 1,
++        num_ccu = 2,
+         tile_align_w = 64,
+         tile_align_h = 16,
+         tile_max_w = 1024,
+-- 
+GitLab
+
