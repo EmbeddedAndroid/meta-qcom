@@ -9,11 +9,15 @@ inherit qcom-sign-common
 
 # The recipes are allarch unless signing is on, which binds the images to
 # the machine's Security Profile, keys and fuse ids and so packages them
-# per machine.  Recipes that opt out of allarch get the tune arch when
-# unsigned.  Hash the value, not the variables it is picked from, so
-# MACHINE does not reach the task hashes of an unsigned build.
-inherit_defer ${@'allarch' if d.getVar('QCOM_FIRMWARE_SIGN_ENABLE') != '1' else ''}
-QCOM_FIRMWARE_SIGN_PACKAGE_ARCH ?= "${@d.getVar('MACHINE_ARCH') if d.getVar('QCOM_FIRMWARE_SIGN_ENABLE') == '1' else d.getVar('TUNE_PKGARCH')}"
+# per machine.  Recipes that disable the allarch handler (dragonboard410c,
+# dragonboard820c) get the tune arch when unsigned.  Recipes that build
+# machine specific code (TF-A) set QCOM_FIRMWARE_SIGN_ALLARCH to "0": they
+# are never allarch and package per machine even when unsigned.  Hash the
+# value, not the variables it is picked from, so MACHINE does not reach
+# the task hashes of an unsigned build.
+QCOM_FIRMWARE_SIGN_ALLARCH ??= "1"
+inherit_defer ${@'allarch' if d.getVar('QCOM_FIRMWARE_SIGN_ENABLE') != '1' and d.getVar('QCOM_FIRMWARE_SIGN_ALLARCH') == '1' else ''}
+QCOM_FIRMWARE_SIGN_PACKAGE_ARCH ?= "${@d.getVar('MACHINE_ARCH') if d.getVar('QCOM_FIRMWARE_SIGN_ENABLE') == '1' or d.getVar('QCOM_FIRMWARE_SIGN_ALLARCH') != '1' else d.getVar('TUNE_PKGARCH')}"
 QCOM_FIRMWARE_SIGN_PACKAGE_ARCH[vardepvalue] = "${QCOM_FIRMWARE_SIGN_PACKAGE_ARCH}"
 PACKAGE_ARCH = "${QCOM_FIRMWARE_SIGN_PACKAGE_ARCH}"
 
