@@ -9,6 +9,7 @@ UBOOT_CONFIG_DEFAULT ?= "${UBOOT_CONFIG}"
 UBOOT_INITIAL_ENV = ""
 
 # Don't forget to add config to qcom-armv8a.conf when adding it here
+UBOOT_CONFIG[eliza-evk] = "qcom_defconfig"
 UBOOT_CONFIG[iq-615-evk] = "qcom_qcs615_defconfig"
 UBOOT_CONFIG[iq-8275-evk] = "qcom_qcs8300_defconfig"
 UBOOT_CONFIG[iq-9075-evk] = "qcom_lemans_defconfig"
@@ -19,6 +20,9 @@ UBOOT_CONFIG[qcs6490-rb3gen2] = "qcm6490_defconfig"
 UBOOT_CONFIG[qrb2210-rb1] = "qcom_defconfig"
 UBOOT_CONFIG[sdm845-db845c] = "qcom_defconfig"
 UBOOT_CONFIG[shikra-evk] = "qcom_shikra_defconfig"
+
+# Booted as BL33 from the TF-A FIP, U-Boot runs on its built-in device tree.
+UBOOT_CONFIG_MAKE_OPTS[eliza-evk] = "DEVICE_TREE=qcom/eliza-cqs-evk"
 
 BOARD_MBN_HEADER[iq-615-evk] = "v6"
 BOARD_MBN_HEADER[iq-8275-evk] = "v6"
