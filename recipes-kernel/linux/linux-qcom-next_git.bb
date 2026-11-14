@@ -36,6 +36,24 @@ SRC_URI += " \
     file://configs/bsp-additions.cfg \
 "
 
+# Fixes found on the Eliza CQS EVK, most of them in drivers every machine
+# of this recipe uses. Each one is in linux-next or posted upstream, carries
+# its Upstream-Status and goes once qcom-next has it. The qcom-next tip
+# (linux-qcom-next-upstream) does not take them.
+LINUX_QCOM_NEXT_FIXES = " \
+    file://fixes/0001-arm64-dts-qcom-eliza-cqs-som-Enable-Adreno-A722-GPU.patch \
+    file://fixes/0002-ASoC-qcom-q6apm-clear-g_apm-on-driver-removal.patch \
+    file://fixes/0003-ASoC-soc-core-copy-the-DAI-link-names-into-the-card.patch \
+    file://fixes/0004-scsi-ufs-qcom-Reprogram-ESI-after-a-host-controller-.patch \
+    file://fixes/0005-FROMLIST-PM-clk-Report-clock-enable-failures-from-pm.patch \
+    file://fixes/0006-FROMLIST-drm-msm-a6xx-fall-back-to-MX-when-gmxc.lvl-.patch \
+    file://fixes/0007-FROMLIST-misc-fastrpc-fix-NULL-rpdev-dereference-whe.patch \
+    file://fixes/0008-FROMLIST-soundwire-qcom-quiesce-runtime-PM-before-re.patch \
+    file://fixes/0009-FROMLIST-media-qcom-Pass-proper-PAS-ID-to-set_remote.patch \
+"
+LINUX_QCOM_NEXT_FIXES:class-devupstream = ""
+SRC_URI += "${LINUX_QCOM_NEXT_FIXES}"
+
 # To build tip of qcom-next branch set preferred
 # virtual/kernel provider to 'linux-qcom-next-upstream'
 BBCLASSEXTEND = "devupstream:target"

@@ -1,0 +1,46 @@
+From aa9bdf8079ace70c0b2311c13286857c43d6e5dc Mon Sep 17 00:00:00 2001
+From: Sumit Garg <sumit.garg@oss.qualcomm.com>
+Date: Tue, 27 Oct 2026 17:32:20 +0530
+Subject: [PATCH] FROMLIST: media: qcom: Pass proper PAS ID to set_remote_state
+ API
+
+As per testing the SCM backend just ignores it while OP-TEE makes
+use of it to for proper book keeping purpose.
+
+Reviewed-by: Mukesh Ojha <mukesh.ojha@oss.qualcomm.com>
+Tested-by: Mukesh Ojha <mukesh.ojha@oss.qualcomm.com> # Lemans
+Reviewed-by: Vikash Garodia <vikash.garodia@oss.qualcomm.com>
+Reviewed-by: Konrad Dybcio <konrad.dybcio@oss.qualcomm.com>
+Signed-off-by: Sumit Garg <sumit.garg@oss.qualcomm.com>
+Reviewed-by: Gourav Kumar <gourav.kumar@oss.qualcomm.com>
+Link: https://lore.kernel.org/r/20261027-pas-id-media-v10-1-8a5312d3050e@oss.qualcomm.com
+Upstream-Status: Submitted [https://lore.kernel.org/r/20261027-pas-id-media-v10-1-8a5312d3050e@oss.qualcomm.com]
+---
+ drivers/media/platform/qcom/iris/iris_firmware.c | 2 +-
+ drivers/media/platform/qcom/venus/firmware.c     | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/media/platform/qcom/iris/iris_firmware.c b/drivers/media/platform/qcom/iris/iris_firmware.c
+index a8b52bc9d..c2964727b 100644
+--- a/drivers/media/platform/qcom/iris/iris_firmware.c
++++ b/drivers/media/platform/qcom/iris/iris_firmware.c
+@@ -245,5 +245,5 @@ int iris_fw_unload(struct iris_core *core)
+ 
+ int iris_set_hw_state(struct iris_core *core, bool resume)
+ {
+-	return qcom_pas_set_remote_state(resume, 0);
++	return qcom_pas_set_remote_state(resume, IRIS_PAS_ID);
+ }
+diff --git a/drivers/media/platform/qcom/venus/firmware.c b/drivers/media/platform/qcom/venus/firmware.c
+index 078ff59d5..964d746dc 100644
+--- a/drivers/media/platform/qcom/venus/firmware.c
++++ b/drivers/media/platform/qcom/venus/firmware.c
+@@ -61,7 +61,7 @@ int venus_set_hw_state(struct venus_core *core, bool resume)
+ 	int ret;
+ 
+ 	if (core->use_tz) {
+-		ret = qcom_pas_set_remote_state(resume, 0);
++		ret = qcom_pas_set_remote_state(resume, VENUS_PAS_ID);
+ 		if (resume && ret == -EINVAL)
+ 			ret = 0;
+ 		return ret;

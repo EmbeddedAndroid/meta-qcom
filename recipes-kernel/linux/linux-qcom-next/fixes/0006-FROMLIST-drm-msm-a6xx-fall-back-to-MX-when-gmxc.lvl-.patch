@@ -1,0 +1,49 @@
+From 8909476c9a81651abd06c8a30aff69b57d170262 Mon Sep 17 00:00:00 2001
+From: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Date: Fri, 30 Oct 2026 15:20:14 -0400
+Subject: [PATCH] FROMLIST: drm/msm/a6xx: fall back to MX when gmxc.lvl has no
+ levels
+
+Eliza's command DB has a gmxc.lvl entry with an all-zero level table,
+though Eliza does not use a GMxC rail. a6xx_gmu_rpmh_votes_init() picks
+any gmxc.lvl entry as the GX secondary rail, so building the GX votes
+fails, a6xx_gmu_init() ignores the error and the GMU gets a zeroed GX
+vote table. On the A722 the first GX_BW_PERF_VOTE HFI then times out
+and the GPU stops responding. Before a6xx_gmu_rpmh_read_arc() began
+trimming trailing zero levels, every GX vote silently used level 0.
+
+Read gmxc.lvl with a6xx_gmu_rpmh_read_arc(), which rejects an entry
+without levels, so the GX votes fall back to mx.lvl.
+
+Fixes: b5269bf0e1ad ("drm/msm/a6xx: Factor out RPMh arc-vote helpers")
+Signed-off-by: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Reviewed-by: Konrad Dybcio <konrad.dybcio@oss.qualcomm.com>
+Link: https://lore.kernel.org/r/20261030192014.694393-1-tyler.baker@oss.qualcomm.com
+Upstream-Status: Submitted [https://lore.kernel.org/r/20261030192014.694393-1-tyler.baker@oss.qualcomm.com]
+---
+ drivers/gpu/drm/msm/adreno/a6xx_gmu.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/gpu/drm/msm/adreno/a6xx_gmu.c b/drivers/gpu/drm/msm/adreno/a6xx_gmu.c
+index 982c66df7..7f9980421 100644
+--- a/drivers/gpu/drm/msm/adreno/a6xx_gmu.c
++++ b/drivers/gpu/drm/msm/adreno/a6xx_gmu.c
+@@ -1889,15 +1889,16 @@ static int a6xx_gmu_rpmh_votes_init(struct a6xx_gmu *gmu)
+ 	struct adreno_gpu *adreno_gpu = &a6xx_gpu->base;
+ 	const struct a6xx_info *info = adreno_gpu->info->a6xx;
+ 	struct msm_gpu *gpu = &adreno_gpu->base;
++	size_t gmxc_lvl_count;
+ 	const char *sec_id;
+ 	const u16 *gmxc;
+ 	int ret;
+ 
+-	gmxc = cmd_db_read_aux_data("gmxc.lvl", NULL);
++	gmxc = a6xx_gmu_rpmh_read_arc("gmxc.lvl", &gmxc_lvl_count);
+ 	if (gmxc == ERR_PTR(-EPROBE_DEFER))
+ 		return -EPROBE_DEFER;
+ 
+-	/* If GMxC is present, prefer that as secondary rail for GX votes */
++	/* If GMxC has levels, prefer it as the secondary rail for GX votes */
+ 	sec_id = IS_ERR_OR_NULL(gmxc) ? "mx.lvl" : "gmxc.lvl";
+ 
+ 	/* Build the GX votes */

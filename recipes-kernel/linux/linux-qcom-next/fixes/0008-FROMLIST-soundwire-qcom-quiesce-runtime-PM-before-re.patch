@@ -1,0 +1,90 @@
+From 7e5cdb949c32f1b3275d4cc493f31224a2e1a96c Mon Sep 17 00:00:00 2001
+From: Myeonghun Pak <mhun512@gmail.com>
+Date: Sat, 12 Sep 2026 22:13:56 -0400
+Subject: [PATCH] FROMLIST: soundwire: qcom: quiesce runtime PM before removing
+ bus
+
+Qualcomm SoundWire controllers enable runtime PM after registering the bus,
+but remove tears down the bus and iface clock while runtime callbacks and
+the main or optional in-band wake IRQ handlers can still run. A controller
+that is already runtime-suspended also has its iface clock disabled, so the
+unconditional clock disable in remove unbalances that clock.
+
+Disable runtime PM first to cancel pending requests and drain any callback.
+Free both controller IRQs synchronously before deleting SoundWire children,
+then disable the iface clock only when runtime suspend has not already done
+so. Record the powered-down state for a later rebind. Bus deletion does not
+require a resume: the Qualcomm master has no put_device_num operation. The
+core disables slave runtime PM before unregistering each SoundWire child.
+
+A pending runtime resume can run while runtime PM is being disabled. Make
+its clock enable failure visible to the PM core and restore the wake IRQ in
+that case, so the runtime status continues to describe the clock state.
+
+This issue was identified during our ongoing static-analysis research while
+reviewing kernel code.
+
+Fixes: 74e79da9fd46 ("soundwire: qcom: add runtime pm support")
+Cc: stable@vger.kernel.org
+Assisted-by: OpenAI:GPT-5.6
+Co-developed-by: Ijae Kim <ae878000@gmail.com>
+Signed-off-by: Ijae Kim <ae878000@gmail.com>
+Signed-off-by: Myeonghun Pak <mhun512@gmail.com>
+Link: https://lore.kernel.org/r/20260913021356.60079-1-mhun512@gmail.com
+Upstream-Status: Submitted [https://lore.kernel.org/r/20260913021356.60079-1-mhun512@gmail.com]
+---
+ drivers/soundwire/qcom.c | 27 +++++++++++++++++++++++----
+ 1 file changed, 23 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/soundwire/qcom.c b/drivers/soundwire/qcom.c
+index 8b7151366..d1de1692c 100644
+--- a/drivers/soundwire/qcom.c
++++ b/drivers/soundwire/qcom.c
+@@ -2218,24 +2218,43 @@ static int qcom_swrm_probe(struct platform_device *pdev)
+ 
+ static void qcom_swrm_remove(struct platform_device *pdev)
+ {
+-	struct qcom_swrm_ctrl *ctrl = dev_get_drvdata(&pdev->dev);
++	struct device *dev = &pdev->dev;
++	struct qcom_swrm_ctrl *ctrl = dev_get_drvdata(dev);
++	bool suspended;
++
++	pm_runtime_disable(dev);
++	suspended = pm_runtime_status_suspended(dev);
++
++	devm_free_irq(dev, ctrl->irq, ctrl);
++	if (ctrl->wake_irq > 0)
++		devm_free_irq(dev, ctrl->wake_irq, ctrl);
+ 
+ 	if (!ctrl->is_lane_provider)
+ 		sdw_bus_master_delete(&ctrl->bus);
+-	clk_disable_unprepare(ctrl->hclk);
++	if (!suspended)
++		clk_disable_unprepare(ctrl->hclk);
++	pm_runtime_set_suspended(dev);
+ }
+ 
+ static int __maybe_unused swrm_runtime_resume(struct device *dev)
+ {
+ 	struct qcom_swrm_ctrl *ctrl = dev_get_drvdata(dev);
++	bool wake_irq_disabled = false;
+ 	int ret;
+ 
+ 	if (ctrl->wake_irq > 0) {
+-		if (!irqd_irq_disabled(irq_get_irq_data(ctrl->wake_irq)))
++		if (!irqd_irq_disabled(irq_get_irq_data(ctrl->wake_irq))) {
+ 			disable_irq_nosync(ctrl->wake_irq);
++			wake_irq_disabled = true;
++		}
+ 	}
+ 
+-	clk_prepare_enable(ctrl->hclk);
++	ret = clk_prepare_enable(ctrl->hclk);
++	if (ret) {
++		if (wake_irq_disabled)
++			enable_irq(ctrl->wake_irq);
++		return ret;
++	}
+ 
+ 	if (ctrl->clock_stop_not_supported) {
+ 		reinit_completion(&ctrl->enumeration);

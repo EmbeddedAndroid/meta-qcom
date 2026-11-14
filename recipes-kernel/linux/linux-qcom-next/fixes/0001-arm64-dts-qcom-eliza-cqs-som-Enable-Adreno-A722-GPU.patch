@@ -1,0 +1,36 @@
+From cbfd87cd5538017e22104db36881689f7321f4a2 Mon Sep 17 00:00:00 2001
+From: Abel Vesa <abel.vesa@oss.qualcomm.com>
+Date: Wed, 2 Sep 2026 11:13:35 +0300
+Subject: [PATCH] arm64: dts: qcom: eliza-cqs-som: Enable Adreno A722 GPU
+
+Enable the Adreno 722 GPU on the Eliza CQS SoM board and provide the zap
+shader firmware path.
+
+Reviewed-by: Konrad Dybcio <konrad.dybcio@oss.qualcomm.com>
+Signed-off-by: Abel Vesa <abel.vesa@oss.qualcomm.com>
+Link: https://lore.kernel.org/r/20260902-dts-qcom-eliza-evk-enable-gpu-v2-1-51b452a460a2@oss.qualcomm.com
+Signed-off-by: Bjorn Andersson <andersson@kernel.org>
+Upstream-Status: Backport [https://git.kernel.org/pub/scm/linux/kernel/git/next/linux-next.git/commit/?id=f0d9238839b3c2ebe3f8c821a2b60e8e3ce2ae6d]
+---
+ arch/arm64/boot/dts/qcom/eliza-cqs-som.dtsi | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/eliza-cqs-som.dtsi b/arch/arm64/boot/dts/qcom/eliza-cqs-som.dtsi
+index 72434199c..a378a500d 100644
+--- a/arch/arm64/boot/dts/qcom/eliza-cqs-som.dtsi
++++ b/arch/arm64/boot/dts/qcom/eliza-cqs-som.dtsi
+@@ -372,6 +372,14 @@ &pm7550ba_eusb2_repeater {
+ 	vdd3-supply = <&vreg_l17b>;
+ };
+ 
++&gpu {
++	status = "okay";
++};
++
++&gpu_zap_shader {
++	firmware-name = "qcom/eliza/gen71700_zap.mbn";
++};
++
+ &remoteproc_adsp {
+ 	firmware-name = "qcom/eliza/adsp.mbn",
+ 			"qcom/eliza/adsp_dtb.mbn";
