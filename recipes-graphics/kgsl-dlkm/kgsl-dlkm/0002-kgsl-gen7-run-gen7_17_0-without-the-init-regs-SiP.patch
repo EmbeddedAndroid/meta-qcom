@@ -1,0 +1,86 @@
+From 5d048264fee585807f82396651483aec7299533c Mon Sep 17 00:00:00 2001
+From: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Date: Thu, 19 Nov 2026 23:22:16 -0800
+Subject: [PATCH] kgsl: gen7: run gen7_17_0 without the init regs SiP
+
+gen7_scm_gpu_init_cx_regs fails the GMU power-up on any error from the
+GPU_INIT_REGS SCM call except -EOPNOTSUPP. Open TF-A on Eliza does not
+implement the call, so every A722 power-up fails and no GPU context can
+be created:
+
+  kgsl-3d 3d00000.gpu: Scm call for requests:0x3 failed with ret:: -5
+  kgsl-3d 3d00000.gpu: Runtime PM usage count underflow!
+
+The upstream msm driver issues the call only for A750, A753 and A8xx,
+never enables BCL over HFI, and runs the A722 on the same firmware.
+
+On gen7_17_0, treat -EIO from the call as firmware without it: warn
+once, power up, and keep BCL off, since gen7_first_boot would otherwise
+enable it with the Central Broadcast register never programmed. Other
+errors and other cores fail the power-up as before.
+
+Signed-off-by: Tyler Baker <tyler.baker@oss.qualcomm.com>
+---
+Upstream-Status: Pending [qualcomm-linux/kgsl, not submitted]
+ adreno.h          |  2 ++
+ adreno_gen7.c     | 17 ++++++++++++++++-
+ adreno_gen7_gmu.c |  2 +-
+ 3 files changed, 19 insertions(+), 2 deletions(-)
+
+diff --git a/adreno.h b/adreno.h
+index 29bf6b3c..92a4a444 100644
+--- a/adreno.h
++++ b/adreno.h
+@@ -752,6 +752,8 @@ struct adreno_device {
+ 	bool sptp_pc_enabled;
+ 	/** @bcl_enabled: True if BCL is enabled */
+ 	bool bcl_enabled;
++	/** @bcl_no_tz: True if firmware did not program the BCL registers */
++	bool bcl_no_tz;
+ 	/** @clx_enabled: True if CLX is enabled */
+ 	bool clx_enabled;
+ 	/** @isense_reg_mapped: True if isense registers are mapped to regmap */
+diff --git a/adreno_gen7.c b/adreno_gen7.c
+index 27626a15..635407c2 100644
+--- a/adreno_gen7.c
++++ b/adreno_gen7.c
+@@ -1126,7 +1126,22 @@ int gen7_scm_gpu_init_cx_regs(struct adreno_device *adreno_dev)
+ 	 * lesser than 6.1 where scm call is not supported or we are sending an
+ 	 * empty request. Ignore the error in such cases.
+ 	 */
+-	return (ret == -EOPNOTSUPP) ? 0 : ret;
++	if (ret == -EOPNOTSUPP)
++		return 0;
++
++	/*
++	 * gen7_17_0 runs without the TZ registers. Firmware that does not
++	 * implement the call answers -EIO; BCL must then stay off, since
++	 * its Central Broadcast register was never programmed.
++	 */
++	if (ret == -EIO && adreno_is_gen7_17_0(adreno_dev)) {
++		dev_warn_once(&device->pdev->dev,
++			      "GPU init regs not set by firmware, BCL disabled\n");
++		adreno_dev->bcl_no_tz = true;
++		return 0;
++	}
++
++	return ret;
+ }
+ 
+ void gen7_spin_idle_debug(struct adreno_device *adreno_dev,
+diff --git a/adreno_gen7_gmu.c b/adreno_gen7_gmu.c
+index 3ab868f1..aa3f4760 100644
+--- a/adreno_gen7_gmu.c
++++ b/adreno_gen7_gmu.c
+@@ -2479,7 +2479,7 @@ static int gen7_first_boot(struct adreno_device *adreno_dev)
+ 	 * after we successfully complete first boot to ensure that Central
+ 	 * Broadcast register was programed before enabling BCL.
+ 	 */
+-	if (ADRENO_FEATURE(adreno_dev, ADRENO_BCL))
++	if (ADRENO_FEATURE(adreno_dev, ADRENO_BCL) && !adreno_dev->bcl_no_tz)
+ 		adreno_dev->bcl_enabled = true;
+ 
+ 	/*
+-- 
+2.43.0
+

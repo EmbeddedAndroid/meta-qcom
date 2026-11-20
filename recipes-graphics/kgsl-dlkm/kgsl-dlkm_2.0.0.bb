@@ -8,6 +8,8 @@ SRCREV = "d70a6765a318eda3e400c711587ce373c693c99e"
 SRC_URI = " \
     git://github.com/qualcomm-linux/kgsl.git;branch=gfx-kernel.le.0.0;protocol=https;tag=v${PV} \
     file://kgsl.rules \
+    file://0001-kgsl-gen7-load-the-linux-firmware-SQE-for-gen7_17_0.patch \
+    file://0002-kgsl-gen7-run-gen7_17_0-without-the-init-regs-SiP.patch \
 "
 
 do_install:append() {

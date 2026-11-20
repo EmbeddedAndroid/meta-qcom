@@ -1,0 +1,40 @@
+From 44f020d87e88b33442b5a9fd5993db33eaa0db1b Mon Sep 17 00:00:00 2001
+From: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Date: Fri, 13 Nov 2026 12:02:24 -0800
+Subject: [PATCH] kgsl: gen7: load the linux-firmware SQE for gen7_17_0
+
+The gen7_17_0 core (Adreno A722, chip ID 0x43020100, Eliza) asks for
+gen70e00_sqe.fw. linux-firmware does not ship that name: the A722 SQE
+is published as qcom/gen71700_sqe.fw, next to the gen71700_gmu.bin
+this entry already uses, and the upstream msm driver loads it under
+that name. With kgsl v2.0.0 on an Eliza EVK every GPU open fails:
+
+  kgsl-3d 3d00000.gpu: Firmware request for gen70e00_sqe.fw failed with error -2
+
+Use gen71700_sqe.fw for gen7_17_0, following the linux-firmware naming
+the newer gen7 and gen8 cores already use. No qualcomm-linux repository
+ships gen70e00_sqe.fw; gen7_14_0 keeps it, since linux-firmware has
+no SQE for that core.
+
+Signed-off-by: Tyler Baker <tyler.baker@oss.qualcomm.com>
+---
+Upstream-Status: Pending [qualcomm-linux/kgsl, not submitted]
+ adreno-gpulist.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/adreno-gpulist.h b/adreno-gpulist.h
+index e446a2af..fb240016 100644
+--- a/adreno-gpulist.h
++++ b/adreno-gpulist.h
+@@ -2936,7 +2936,7 @@ static const struct adreno_gen7_core adreno_gpu_core_gen7_17_0 = {
+ 		.mal = 32,
+ 		.highest_bank_bit = 15,
+ 	},
+-	.sqefw_name = "gen70e00_sqe.fw",
++	.sqefw_name = "gen71700_sqe.fw",
+ 	.gmufw_name = "gen71700_gmu.bin",
+ 	.zap_name = "gen70e00_zap.mbn",
+ 	.hwcg = gen7_0_0_hwcg_regs,
+-- 
+2.43.0
+
