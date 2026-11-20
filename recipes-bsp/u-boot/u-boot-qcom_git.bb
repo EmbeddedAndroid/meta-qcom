@@ -38,6 +38,13 @@ SRC_URI += " \
     ${@bb.utils.contains('SPL_SIGN_ENABLE', '1', 'file://spl-fit-signature.cfg', '', d)} \
 "
 
+# u-boot.inc writes UBOOT_LOCALVERSION into .scmversion only when there is
+# none, so a build directory left by an interrupted build would keep the
+# previous version string.
+do_compile:prepend() {
+    rm -f ${B}/.scmversion ${S}/.scmversion
+}
+
 python __anonymous() {
     ubootconfig = (d.getVar('UBOOT_CONFIG') or "").split()
 
