@@ -1,0 +1,39 @@
+From dc596e2dd18abd110195c71ba778025068127f8a Mon Sep 17 00:00:00 2001
+From: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Date: Mon, 9 Nov 2026 01:33:35 +0000
+Subject: [PATCH] q6apm_audio_mem: free the char region that was allocated
+
+alloc_chrdev_region() stores the region in mem_data->mem_major, but the
+probe error path and msm_audio_mem_unreg_chrdev() free major 0, so every
+unbind leaks the region and each rebind takes a new major.
+
+Free mem_data->mem_major.
+
+Signed-off-by: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Upstream-Status: Submitted [https://github.com/AudioReach/audioreach-kernel/pull/94]
+---
+ audioreach-driver/q6apm_audio_mem.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/audioreach-driver/q6apm_audio_mem.c b/audioreach-driver/q6apm_audio_mem.c
+index 229f3da..91d2cb8 100644
+--- a/audioreach-driver/q6apm_audio_mem.c
++++ b/audioreach-driver/q6apm_audio_mem.c
+@@ -1457,7 +1457,7 @@ static int msm_audio_mem_reg_chrdev(struct msm_audio_mem_private *mem_data)
+ err_device:
+ 	class_destroy(mem_data->mem_class);
+ err_class:
+-	unregister_chrdev_region(0, MINOR_NUMBER_COUNT);
++	unregister_chrdev_region(mem_data->mem_major, MINOR_NUMBER_COUNT);
+ 	return ret;
+ }
+ 
+@@ -1466,7 +1466,7 @@ static int msm_audio_mem_unreg_chrdev(struct msm_audio_mem_private *mem_data)
+ 	cdev_del(&mem_data->cdev);
+ 	device_destroy(mem_data->mem_class, mem_data->mem_major);
+ 	class_destroy(mem_data->mem_class);
+-	unregister_chrdev_region(0, MINOR_NUMBER_COUNT);
++	unregister_chrdev_region(mem_data->mem_major, MINOR_NUMBER_COUNT);
+ 	return 0;
+ }
+ 
