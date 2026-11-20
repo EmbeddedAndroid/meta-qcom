@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Date: Fri, 6 Nov 2026 08:40:00 +0000
+Subject: [PATCH] pw-pal-plugin: let a source node ask for the PAL raw stream
+
+Every PAL source opens a PAL_STREAM_DEEP_BUFFER stream, whose speaker
+mic graph carries the Fluence SMECNS device processing: echo
+cancellation and noise suppression remove a tone played on the
+speakers, so no node records the microphones as they are. The ACDBs
+carry a PAL_STREAM_RAW record graph for that, which nothing can reach.
+
+Open PAL_STREAM_RAW for a source node whose "pal.stream.type" property
+is "raw".
+
+Signed-off-by: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Upstream-Status: Pending [to send: AudioReach/audioreach-pipewire-plugin]
+---
+ src/pw-pal-plugin.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/pw-pal-plugin.c b/src/pw-pal-plugin.c
+--- a/src/pw-pal-plugin.c
++++ b/src/pw-pal-plugin.c
+@@ -2214,6 +2214,10 @@
+                 udata->stream_type = PAL_STREAM_DEEP_BUFFER;
+             else
+                 udata->stream_type = PAL_STREAM_LOW_LATENCY;
++    } else if (!udata->isplayback &&
++               pw_properties_get(props, "pal.stream.type") &&
++               !strcmp(pw_properties_get(props, "pal.stream.type"), "raw")) {
++        udata->stream_type = PAL_STREAM_RAW;
+     } else {
+         udata->stream_type = PAL_STREAM_DEEP_BUFFER;
+     }
+-- 
+2.43.0
