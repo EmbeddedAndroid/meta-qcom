@@ -1,0 +1,105 @@
+From f6b6ae5659597b6bbff4faa206f97d241d563b8a Mon Sep 17 00:00:00 2001
+From: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Date: Thu, 19 Nov 2026 03:28:08 -0500
+Subject: [PATCH] reboot-mode: add dm_reboot_mode_set
+
+The reboot-mode uclass can read back a stored mode, but a caller that
+wants to store one for the next boot has to look up the mode value in
+the uclass platform data and call the driver's set op itself.
+
+Add dm_reboot_mode_set, which stores the mode with the given name
+("mode-<name>" in the device tree) and returns -ENOENT when the device
+has no such mode, so a caller can try the next reboot-mode device.
+
+Signed-off-by: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Upstream-Status: Pending [port of EmbeddedAndroid/u-boot qcom/eliza-next a2c5817e0c0, mode_id is magic[0] here]
+---
+ drivers/reboot-mode/reboot-mode-uclass.c | 18 ++++++++++++++++++
+ include/reboot-mode/reboot-mode.h        | 10 ++++++++++
+ test/dm/reboot-mode.c                    | 23 +++++++++++++++++++++++
+ 3 files changed, 51 insertions(+)
+
+diff --git a/drivers/reboot-mode/reboot-mode-uclass.c b/drivers/reboot-mode/reboot-mode-uclass.c
+index 0125037a65..40d2775471 100644
+--- a/drivers/reboot-mode/reboot-mode-uclass.c
++++ b/drivers/reboot-mode/reboot-mode-uclass.c
+@@ -55,6 +55,24 @@ int dm_reboot_mode_update(struct udevice *dev)
+ 	return 0;
+ }
+ 
++int dm_reboot_mode_set(struct udevice *dev, const char *name)
++{
++	struct reboot_mode_ops *ops = reboot_mode_get_ops(dev);
++	const struct reboot_mode_uclass_platdata *plat_data =
++		dev_get_uclass_plat(dev);
++	int i;
++
++	if (!ops->set)
++		return -ENOSYS;
++
++	for (i = 0; i < plat_data->count; i++) {
++		if (!strcmp(plat_data->modes[i].mode_name, name))
++			return ops->set(dev, plat_data->modes[i].magic[0]);
++	}
++
++	return -ENOENT;
++}
++
+ int reboot_mode_request(const char *name)
+ {
+ 	const struct reboot_mode_uclass_platdata *plat_data;
+diff --git a/include/reboot-mode/reboot-mode.h b/include/reboot-mode/reboot-mode.h
+index 67be5e4b3e..3c8137c823 100644
+--- a/include/reboot-mode/reboot-mode.h
++++ b/include/reboot-mode/reboot-mode.h
+@@ -75,6 +75,16 @@ struct reboot_mode_ops {
+  */
+ int dm_reboot_mode_update(struct udevice *dev);
+ 
++/**
++ * dm_reboot_mode_set() - Store a reboot mode by name for the next boot.
++ *
++ * @dev:	Reboot mode device
++ * @name:	Mode name, the part after "mode-" in the device tree property
++ * Return: 0 if OK, -ENOENT if @dev has no such mode, -ENOSYS if @dev cannot
++ * store a mode, other -ve on error
++ */
++int dm_reboot_mode_set(struct udevice *dev, const char *name);
++
+ /**
+  * reboot_mode_request() - reset the system into a named mode
+  *
+diff --git a/test/dm/reboot-mode.c b/test/dm/reboot-mode.c
+index 7dbaea8c9c..4d2dd26ffc 100644
+--- a/test/dm/reboot-mode.c
++++ b/test/dm/reboot-mode.c
+@@ -104,6 +104,29 @@ static int dm_test_reboot_mode_rtc(struct unit_test_state *uts)
+ DM_TEST(dm_test_reboot_mode_rtc,
+ 	UTF_PROBE_TEST | UTF_SCAN_FDT | UTF_FLAT_TREE);
+ 
++static int dm_test_reboot_mode_set(struct unit_test_state *uts)
++{
++	struct udevice *rtc_dev;
++	struct udevice *rm_dev;
++	u32 read_val;
++
++	ut_assertok(uclass_get_device_by_name(UCLASS_RTC, "rtc@43", &rtc_dev));
++	ut_assertok(uclass_get_device_by_name(UCLASS_REBOOT_MODE,
++					      "reboot-mode@14", &rm_dev));
++
++	ut_assertok(dm_reboot_mode_set(rm_dev, "download"));
++	ut_assertok(dm_rtc_read(rtc_dev, REG_AUX0, (u8 *)&read_val, 4));
++	ut_asserteq(cpu_to_be32(0x51939147), read_val);
++
++	ut_asserteq(-ENOENT, dm_reboot_mode_set(rm_dev, "no-such-mode"));
++	ut_assertok(dm_rtc_read(rtc_dev, REG_AUX0, (u8 *)&read_val, 4));
++	ut_asserteq(cpu_to_be32(0x51939147), read_val);
++
++	return 0;
++}
++DM_TEST(dm_test_reboot_mode_set,
++	UTF_PROBE_TEST | UTF_SCAN_FDT | UTF_FLAT_TREE);
++
+ /* reboot_mode_request() triggers a named mode with the right magic cells */
+ static int dm_test_reboot_mode_request(struct unit_test_state *uts)
+ {

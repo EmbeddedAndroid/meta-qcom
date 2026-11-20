@@ -31,12 +31,20 @@ SRC_URI += " \
     file://0009-arm-dts-eliza-reserve-the-rest-of-the-DARE-regions.patch \
     file://0010-FROMLIST-arm64-dts-qcom-eliza-add-the-APSS-watchdog.patch \
     file://0011-arm-dts-eliza-enable-the-APSS-watchdog.patch \
+    file://0012-iommu-qcom-smmu-leave-a-disabled-SMMU-alone-in-EL2.patch \
+    file://0013-spmi-msm-support-the-multi-bus-v7-arbiter-binding.patch \
+    file://0014-reboot-mode-add-dm_reboot_mode_set.patch \
+    file://0015-fastboot-store-the-reboot-reason-in-a-reboot-mode-de.patch \
     file://disable-eficapsule-tool.cfg \
     file://efi-rt-volatile-store.cfg \
     ${@bb.utils.contains('MACHINE_FEATURES', 'optee', 'file://tfa-optee.cfg', '', d)} \
     ${@bb.utils.contains('MACHINE_FEATURES', 'kvm', 'file://gunyah-exit.cfg', '', d)} \
     ${@bb.utils.contains('SPL_SIGN_ENABLE', '1', 'file://spl-fit-signature.cfg', '', d)} \
 "
+
+# qcom_defconfig points fastboot flash/erase at scsi device 4 (UFS); the
+# Eliza EVK boots from eMMC.
+SRC_URI:append:eliza-evk-emmc-open-fw = " file://fastboot-emmc.cfg"
 
 # u-boot.inc writes UBOOT_LOCALVERSION into .scmversion only when there is
 # none, so a build directory left by an interrupted build would keep the

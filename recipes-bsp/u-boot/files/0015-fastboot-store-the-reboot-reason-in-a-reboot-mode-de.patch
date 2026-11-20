@@ -1,0 +1,194 @@
+From d15c773072a2d24cfae5d4d8ca9077b6e6390264 Mon Sep 17 00:00:00 2001
+From: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Date: Thu, 19 Nov 2026 03:28:08 -0500
+Subject: [PATCH] fastboot: store the reboot reason in a reboot-mode device
+
+fastboot reboot-bootloader only resets the board after the default
+fastboot_set_reboot_flag has written "bootonce-bootloader" to the
+Android BCB in the "misc" partition. On boards without CMD_BCB or
+without a misc partition, which includes every Qualcomm board using
+qcom_defconfig, the bcb helpers return -EOPNOTSUPP and the command
+fails without a reset:
+
+  $ fastboot reboot-bootloader
+  Rebooting into bootloader    FAILED (remote: 'Cannot set reboot flag')
+
+These boards describe the reboot reason Linux uses for "reboot
+bootloader" as a reboot-mode node with mode-bootloader, and U-Boot
+reads it back into the reboot-mode variable at boot.
+
+Store the reason in the first reboot-mode device with a mode of the
+same name (bootloader, fastboot, recovery) and fall back to the BCB
+when there is none, so the reboot commands work wherever the board's
+device tree has a reboot-mode node.
+
+Signed-off-by: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Upstream-Status: Pending [port of EmbeddedAndroid/u-boot qcom/eliza-next c27b1c31e4f]
+---
+ arch/sandbox/dts/test.dts    |  1 +
+ doc/android/fastboot.rst     | 20 +++++++++++++++++-
+ drivers/fastboot/fb_common.c | 40 +++++++++++++++++++++++++++++++++---
+ test/dm/reboot-mode.c        | 22 ++++++++++++++++++++
+ 4 files changed, 79 insertions(+), 4 deletions(-)
+
+diff --git a/arch/sandbox/dts/test.dts b/arch/sandbox/dts/test.dts
+index fd0dfe5068..a921007480 100644
+--- a/arch/sandbox/dts/test.dts
++++ b/arch/sandbox/dts/test.dts
+@@ -207,6 +207,7 @@
+ 		big-endian;
+ 		mode-test = <0x21969147>;
+ 		mode-download = <0x51939147>;
++		mode-bootloader = <0x02000000>;
+ 	};
+ 
+ 	reboot-mode-trigger {
+diff --git a/doc/android/fastboot.rst b/doc/android/fastboot.rst
+index fa318b4007..43040dfd44 100644
+--- a/doc/android/fastboot.rst
++++ b/doc/android/fastboot.rst
+@@ -17,7 +17,8 @@ The current implementation supports the following standard commands:
+ - ``flash`` (if enabled)
+ - ``getvar``
+ - ``reboot``
+-- ``reboot-bootloader``
++- ``reboot-bootloader``, ``reboot-fastboot`` and ``reboot-recovery`` (see
++  `Reboot reason`_)
+ - ``set_active`` (only a stub implementation which always succeeds)
+ - ``ucmd`` (if enabled)
+ - ``acmd`` (if enabled)
+@@ -72,6 +73,23 @@ platform. The location of the buffer and size are set with
+ may be overridden on the fastboot command line using ``-l`` and
+ ``-s``.
+ 
++Reboot reason
++-------------
++
++``reboot-bootloader``, ``reboot-fastboot`` and ``reboot-recovery`` store a
++reboot reason before the reset, so the next boot can act on it. Unless the
++board overrides ``fastboot_set_reboot_flag()``, the reason is stored:
++
++- in the first reboot-mode device (``CONFIG_DM_REBOOT_MODE``) that has a mode
++  named ``bootloader``, ``fastboot`` or ``recovery`` respectively, i.e. a
++  ``mode-bootloader`` etc. property in its device tree node; the next boot
++  reads it back into the reboot-mode environment variable;
++- otherwise in the Android bootloader control block of the ``misc``
++  partition (``CONFIG_CMD_BCB``).
++
++If neither is available the command fails with ``Cannot set reboot flag`` and
++the board is not reset.
++
+ Fastboot environment variables
+ ------------------------------
+ 
+diff --git a/drivers/fastboot/fb_common.c b/drivers/fastboot/fb_common.c
+index 2ff6e6567c..d98439f406 100644
+--- a/drivers/fastboot/fb_common.c
++++ b/drivers/fastboot/fb_common.c
+@@ -12,9 +12,11 @@
+ 
+ #include <bcb.h>
+ #include <command.h>
++#include <dm.h>
+ #include <env.h>
+ #include <fastboot.h>
+ #include <net.h>
++#include <reboot-mode/reboot-mode.h>
+ #include <vsprintf.h>
+ 
+ /**
+@@ -79,15 +81,41 @@ void fastboot_okay(const char *reason, char *response)
+ 		fastboot_response("OKAY", response, NULL);
+ }
+ 
++/*
++ * Store the reason in the first reboot-mode device that has a mode of the
++ * same name ("mode-bootloader" etc. in its device tree node).
++ */
++static int __maybe_unused fastboot_set_reboot_mode(enum fastboot_reboot_reason reason)
++{
++	static const char * const modes[] = {
++		[FASTBOOT_REBOOT_REASON_BOOTLOADER] = "bootloader",
++		[FASTBOOT_REBOOT_REASON_FASTBOOTD] = "fastboot",
++		[FASTBOOT_REBOOT_REASON_RECOVERY] = "recovery",
++	};
++	struct udevice *dev;
++	int ret;
++
++	if (reason >= FASTBOOT_REBOOT_REASONS_COUNT)
++		return -EINVAL;
++
++	uclass_foreach_dev_probe(UCLASS_REBOOT_MODE, dev) {
++		ret = dm_reboot_mode_set(dev, modes[reason]);
++		if (ret != -ENOENT && ret != -ENOSYS)
++			return ret;
++	}
++
++	return -ENOENT;
++}
++
+ /**
+  * fastboot_set_reboot_flag() - Set flag to indicate reboot-bootloader
+  *
+  * Set flag which indicates that we should reboot into the bootloader
+  * following the reboot that fastboot executes after this function.
+  *
+- * This function should be overridden in your board file with one
+- * which sets whatever flag your board specific Android bootloader flow
+- * requires in order to re-enter the bootloader.
++ * The default stores the reason in a reboot-mode device when one has a
++ * matching mode, and otherwise in the Android BCB of the "misc" partition.
++ * Boards whose bootloader flow needs another flag override this function.
+  */
+ int __weak fastboot_set_reboot_flag(enum fastboot_reboot_reason reason)
+ {
+@@ -108,6 +136,12 @@ int __weak fastboot_set_reboot_flag(enum fastboot_reboot_reason reason)
+ 						   CONFIG_FASTBOOT_FLASH_BLOCK_INTERFACE_NAME,
+ 						   "mmc");
+ 
++	if (IS_ENABLED(CONFIG_DM_REBOOT_MODE)) {
++		ret = fastboot_set_reboot_mode(reason);
++		if (ret != -ENOENT)
++			return ret;
++	}
++
+ 	if (device == -1)
+ 		return -EINVAL;
+ 
+diff --git a/test/dm/reboot-mode.c b/test/dm/reboot-mode.c
+index 4d2dd26ffc..471476cee2 100644
+--- a/test/dm/reboot-mode.c
++++ b/test/dm/reboot-mode.c
+@@ -7,6 +7,7 @@
+ #include <reboot-mode/reboot-mode.h>
+ #include <console.h>
+ #include <env.h>
++#include <fastboot.h>
+ #include <log.h>
+ #include <asm/gpio.h>
+ #include <asm/rtc.h>
+@@ -176,3 +177,24 @@ static int dm_test_reboot_mode_list(struct unit_test_state *uts)
+ }
+ DM_TEST(dm_test_reboot_mode_list,
+ 	UTF_PROBE_TEST | UTF_SCAN_FDT | UTF_FLAT_TREE);
++
++/* reboot-mode0 has no "bootloader" mode, so the RTC-backed device takes it */
++static int dm_test_reboot_mode_fastboot(struct unit_test_state *uts)
++{
++	struct udevice *rtc_dev;
++	u32 val = 0;
++
++	if (!CONFIG_IS_ENABLED(FASTBOOT))
++		return -EAGAIN;
++
++	ut_assertok(uclass_get_device_by_name(UCLASS_RTC, "rtc@43", &rtc_dev));
++	ut_assertok(dm_rtc_write(rtc_dev, REG_AUX0, (u8 *)&val, 4));
++
++	ut_assertok(fastboot_set_reboot_flag(FASTBOOT_REBOOT_REASON_BOOTLOADER));
++	ut_assertok(dm_rtc_read(rtc_dev, REG_AUX0, (u8 *)&val, 4));
++	ut_asserteq(cpu_to_be32(0x02000000), val);
++
++	return 0;
++}
++DM_TEST(dm_test_reboot_mode_fastboot,
++	UTF_PROBE_TEST | UTF_SCAN_FDT | UTF_FLAT_TREE);

@@ -1,0 +1,99 @@
+From 1b9c5a20f885b6ab5f50ba7d352ebc0a22a6e213 Mon Sep 17 00:00:00 2001
+From: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Date: Thu, 19 Nov 2026 04:34:16 -0500
+Subject: [PATCH] iommu: qcom-smmu: leave a disabled SMMU alone in EL2
+
+Commit 31e6e3fa9c17 ("iommu: add PCI stream-ID resolution for devices
+without an ofnode") dropped the EL2 self-disable so that streams are
+set up where the boot firmware enables the SMMU with faulting unmatched
+streams. On Eliza nothing enables the apps SMMU: sCR0.CLIENTPD stays
+set, every transaction bypasses it and SMR, S2CR and CBAR hold their
+reset values. alloc_cb reads those CBARs as banks in use and each SMMU
+client reports a failure while its DMA works:
+
+  15000000: 00250001
+  Error: qcom_smmu_connect: failed to allocate context bank for usb@a600000
+
+In EL2 decide on the SMMU's own state: skip it when CLIENTPD is set,
+set up streams otherwise, and fail the connect when no bank is free and
+sCR0.USFCFG makes the stream fault. EL1 behaviour is unchanged.
+
+Fixes: 31e6e3fa9c17 ("iommu: add PCI stream-ID resolution for devices without an ofnode")
+Signed-off-by: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Upstream-Status: Pending [port of EmbeddedAndroid/u-boot qcom/eliza-next 60e05f565b10 to qcom-next]
+---
+ drivers/iommu/qcom-hyp-smmu.c | 26 +++++++++++++++++++++++++-
+ 1 file changed, 25 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/iommu/qcom-hyp-smmu.c b/drivers/iommu/qcom-hyp-smmu.c
+index 3fc3e1211a..bd34e4d635 100644
+--- a/drivers/iommu/qcom-hyp-smmu.c
++++ b/drivers/iommu/qcom-hyp-smmu.c
+@@ -7,6 +7,7 @@
+  */
+ 
+ #include <log.h>
++#include <cpu_func.h>
+ #include <dm.h>
+ #include <iommu.h>
+ #include <linux/bitfield.h>
+@@ -20,6 +21,10 @@
+ #define ARM_SMMU_GR0 0
+ #define ARM_SMMU_GR1 1
+ 
++#define ARM_SMMU_GR0_sCR0 0x0
++#define ARM_SMMU_sCR0_CLIENTPD BIT(0) /* Transactions bypass the SMMU */
++#define ARM_SMMU_sCR0_USFCFG BIT(10) /* Unmatched streams fault */
++
+ #define ARM_SMMU_GR0_ID0 0x20
+ #define ARM_SMMU_ID0_NUMSMRG GENMASK(7, 0) /* Number of stream mapping groups */
+ #define ARM_SMMU_GR0_ID1 0x24
+@@ -91,6 +96,10 @@ struct qcom_smmu_priv {
+ 	phys_addr_t base;
+ 	struct list_head devices;
+ 	struct udevice *dev;
++	/* EL2 and the SMMU is disabled: every transaction bypasses it */
++	bool disable;
++	/* EL2 and streams without a stream mapping entry fault */
++	bool usf_fault;
+ 
+ 	/* Read-once config */
+ 	int num_cb;
+@@ -290,6 +299,9 @@ static int qcom_smmu_connect(struct udevice *dev)
+ 	if (WARN_ON(!priv))
+ 		return -EINVAL;
+ 
++	if (priv->disable)
++		return 0;
++
+ 	mdev = alloc_dev(dev);
+ 	if (IS_ERR(mdev) && PTR_ERR(mdev) != -EEXIST) {
+ 		printf("%s: %s Couldn't create mmu context\n", __func__,
+@@ -309,7 +321,8 @@ static int qcom_smmu_connect(struct udevice *dev)
+ 	if (ret < 0 || ret > 0xff) {
+ 		printf("Error: %s: failed to allocate context bank for %s\n",
+ 		       __func__, dev->name);
+-		return 0;
++		/* Fail the device only if its DMA would fault */
++		return priv->usf_fault ? -ENOSPC : 0;
+ 	}
+ 	mdev->cbx = ret;
+ 
+@@ -361,6 +374,17 @@ static int qcom_smmu_probe(struct udevice *dev)
+ 	priv->base = dev_read_addr(dev);
+ 	INIT_LIST_HEAD(&priv->devices);
+ 
++	/*
++	 * In EL2 no hypervisor sits between U-Boot and the SMMU. If the boot
++	 * firmware left it disabled (CLIENTPD), every transaction bypasses it
++	 * and its stream mapping and context bank registers hold UNKNOWN
++	 * values, so there is nothing to set up and nothing to trust. In EL1
++	 * the registers are the hypervisor's view and are used as they are.
++	 */
++	val = gr0_readl(priv, ARM_SMMU_GR0_sCR0);
++	priv->disable = current_el() > 1 && (val & ARM_SMMU_sCR0_CLIENTPD);
++	priv->usf_fault = current_el() > 1 && (val & ARM_SMMU_sCR0_USFCFG);
++
+ 	/* Read SMMU config */
+ 	val = gr0_readl(priv, ARM_SMMU_GR0_ID0);
+ 	priv->num_smr = FIELD_GET(ARM_SMMU_ID0_NUMSMRG, val);
