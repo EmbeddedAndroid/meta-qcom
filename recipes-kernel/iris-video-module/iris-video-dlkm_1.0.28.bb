@@ -7,6 +7,15 @@ SRC_URI = " \
     git://github.com/qualcomm-linux/video-driver.git;protocol=https;branch=video.qclinux.main;tag=v${PV} \
     file://blacklist-video.conf.venus \
     file://blacklist-video.conf.vidc \
+    file://0001-video-driver-iris33-look-up-power-resources-by-platf.patch \
+    file://0002-video-driver-iris33-make-decide_work_mode-static.patch \
+    file://0003-video-driver-eliza-add-platform-support.patch \
+    file://0004-video-driver-Remove-interlaced-frame-handling-from-b.patch \
+    file://0005-video-driver-vdec-hold-the-DRC-source-change-until-L.patch \
+    file://0006-video-driver-vidc-shrink-the-COMV-buffer-at-reconfig.patch \
+    file://0007-video-driver-iris33-size-H.264-HEVC-COMV-for-the-wor.patch \
+    file://0008-video-driver-resources-allow-optional-reset-clocks.patch \
+    file://0009-video-driver-iris33-reset-the-vcodec-core-on-Eliza.patch \
 "
 SRCREV  = "269addefac0f3378a152cd2cfca18b83103e9300"
 
@@ -54,9 +63,6 @@ ALTERNATIVE_PRIORITY_${PN}-bl-vidc:purwa = "150"
 
 # On hamoa, prioritize blacklisting unsupported iris_vpu to load qcom-iris.
 ALTERNATIVE_PRIORITY_${PN}-bl-vidc:hamoa = "150"
-
-# On eliza, prioritize blacklisting unsupported iris_vpu to load qcom-iris.
-ALTERNATIVE_PRIORITY_${PN}-bl-vidc:eliza = "150"
 
 ALTERNATIVE:${PN}-bl-venus = "blacklist-video"
 ALTERNATIVE_TARGET_${PN}-bl-venus = "${sysconfdir}/modprobe.d/blacklist-video.conf.venus"

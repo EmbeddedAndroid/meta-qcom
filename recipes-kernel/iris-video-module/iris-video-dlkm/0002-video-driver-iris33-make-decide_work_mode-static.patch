@@ -1,0 +1,37 @@
+From bccd8caf2701c5c01a972e77580f0308bb99b1ec Mon Sep 17 00:00:00 2001
+From: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Date: Sat, 14 Nov 2026 03:57:17 -0800
+Subject: [PATCH 2/6] video-driver: iris33: make decide_work_mode static
+
+msm_vidc_decide_work_mode_iris33 is only referenced through the iris33
+session ops in the same file, and no header declares it. The QLI Kbuild
+builds with -Wmissing-prototypes and -Werror, so building the iris33
+variant there fails:
+
+  msm_vidc_iris33.c:1632:5: error: no previous prototype for
+  'msm_vidc_decide_work_mode_iris33' [-Werror=missing-prototypes]
+
+Make it static, as iris3 and iris36 do for their work mode helpers.
+
+Signed-off-by: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Upstream-Status: Pending [qualcomm-linux/video-driver]
+---
+ driver/variant/iris33/src/msm_vidc_iris33.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/driver/variant/iris33/src/msm_vidc_iris33.c b/driver/variant/iris33/src/msm_vidc_iris33.c
+index 4db9e0ef..475b688a 100644
+--- a/driver/variant/iris33/src/msm_vidc_iris33.c
++++ b/driver/variant/iris33/src/msm_vidc_iris33.c
+@@ -1616,7 +1616,7 @@ static int __switch_gdsc_mode_iris33(struct msm_vidc_core *core, bool sw_mode)
+ 	return 0;
+ }
+ 
+-int msm_vidc_decide_work_mode_iris33(struct msm_vidc_inst *inst)
++static int msm_vidc_decide_work_mode_iris33(struct msm_vidc_inst *inst)
+ {
+ 	u32 work_mode;
+ 	struct v4l2_format *inp_f;
+-- 
+2.43.0
+

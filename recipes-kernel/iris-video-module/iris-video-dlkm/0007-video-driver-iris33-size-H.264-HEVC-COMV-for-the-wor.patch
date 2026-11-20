@@ -1,0 +1,69 @@
+From e5f19151db20aa5e3856f68efb3cd4aa70313743 Mon Sep 17 00:00:00 2001
+From: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Date: Sun, 15 Nov 2026 09:30:00 +0000
+Subject: [PATCH 07/11] video-driver: iris33: size H.264/HEVC COMV for the
+ worst DPB
+
+Until the first input settings change, the H.264/HEVC COMV (collocated
+motion vector) buffer is sized for the default output min count (4).
+When capture is streamed on before the first sequence header is
+parsed, the capture START can reach the firmware while it parses that
+header. The firmware then raises the settings change and, without
+waiting for the host, fails the session:
+
+  h264DecCalcBufReq(1912): num of col buffer not enough. host 4 < fw 6
+  Session Error: HFI_ERROR_FATAL - vfw_h264_main.c:1916
+
+An HFI trace has the capture START 61 us before the settings change
+and the fatal 386 us after it, nothing sent by the host in between.
+FFmpeg streams capture on early and failed 3 of 160 sessions on a
+256x144 H.264 clip; a client that streams capture on 0-1500 us after
+the first bitstream buffer failed 9 of 215 H.264/HEVC sessions.
+
+Until the firmware has reported its count, size COMV for the largest
+DPB H.264 and HEVC allow, 16 pictures plus the current one: 0 of 215
+then fail. At 4096x2176 that is 74.5 MiB for H.264 and 144.5 MiB for
+HEVC instead of 17.5 and 34 MiB, released by the previous patch when
+the client completes the reconfig. Thumbnail sessions are unchanged.
+
+Fixes: 3d9c6f17f9fa ("video: driver: Add support for lanai/iris3.3 platform")
+Signed-off-by: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Upstream-Status: Pending [qualcomm-linux/video-driver]
+---
+ driver/variant/iris33/src/msm_vidc_buffer_iris33.c | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/driver/variant/iris33/src/msm_vidc_buffer_iris33.c b/driver/variant/iris33/src/msm_vidc_buffer_iris33.c
+index b92e979f..40d48257 100644
+--- a/driver/variant/iris33/src/msm_vidc_buffer_iris33.c
++++ b/driver/variant/iris33/src/msm_vidc_buffer_iris33.c
+@@ -58,6 +58,9 @@ static u32 msm_vidc_decoder_bin_size_iris33(struct msm_vidc_inst *inst)
+ 	return size;
+ }
+ 
++/* H.264 A.3.1 and HEVC A.4.2 cap the DPB at 16 pictures */
++#define H26X_MAX_DPB_FRAMES 16
++
+ static u32 msm_vidc_decoder_comv_size_iris33(struct msm_vidc_inst *inst)
+ {
+ 	u32 size = 0;
+@@ -81,6 +84,16 @@ static u32 msm_vidc_decoder_comv_size_iris33(struct msm_vidc_inst *inst)
+ 		else
+ 			num_comv = inst->fw_min_count ?
+ 				inst->fw_min_count + 7 : inst->buffers.output.min_count + 7;
++	} else if (!inst->fw_min_count && !is_thumbnail_session(inst) &&
++		   (inst->codec == MSM_VIDC_H264 || inst->codec == MSM_VIDC_HEVC)) {
++		/*
++		 * A capture START that reaches the firmware while it parses the
++		 * first sequence header makes it check COMV against the stream
++		 * right after the settings change and fail the session when
++		 * short. Cover the largest DPB plus the current picture until
++		 * the firmware reports its count.
++		 */
++		num_comv = H26X_MAX_DPB_FRAMES + 1;
+ 	} else {
+ 		num_comv = inst->buffers.output.min_count;
+ 	}
+-- 
+2.43.0
+

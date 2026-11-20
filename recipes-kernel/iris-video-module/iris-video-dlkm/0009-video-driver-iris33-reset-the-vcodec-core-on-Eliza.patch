@@ -1,0 +1,70 @@
+From 40edb9ae360ed74fb62e7a5895d2466226082358 Mon Sep 17 00:00:00 2001
+From: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Date: Sun, 15 Nov 2026 12:30:00 +0000
+Subject: [PATCH 09/11] video-driver: iris33: reset the vcodec core on Eliza
+
+__power_off_iris33_controller asserts the MVS0 (vcodec core) reset
+only when the platform names one, and the Eliza table names none. The
+vcodec core then keeps its state across power collapses, including
+the output address of the capture buffer the firmware held when the
+capture port stopped, and writes that buffer's last rows at the next
+power-off and power-on, after the session closed and freed it:
+
+  capture STOP acked 25189.6 ms, session closed 25190.7 ms
+  power-off 26716.9 ms, pixel fault iova 0xdffce780 at 26721.3 ms
+  power-on  45325.5 ms, pixel fault iova 0xdffce080 at 45329.2 ms
+
+The next session hangs ("VCODEC HW is hung due to (CCE 1"). An
+encoder's BIN buffer is also written after its release. Vendor parts
+name video_mvs0_reset; the Eliza binding has no such reset, so nothing
+failed until a stale write hit a freed buffer.
+
+Use the vcodec0_core reset when the Eliza DT provides it. With it, 9
+rounds of GStreamer and encode sessions each followed by a power
+collapse or a rebind gave no fault and no hang; the one round run
+without it, on the same build, faulted and hung. A DT without the
+reset logs it and runs as before.
+
+Fixes: 3368a86d51e9 ("video-driver: eliza: add platform support")
+Signed-off-by: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Upstream-Status: Pending [qualcomm-linux/video-driver]
+---
+ driver/platform/eliza/src/eliza.c           | 1 +
+ driver/variant/iris33/src/msm_vidc_iris33.c | 2 +-
+ 2 files changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/driver/platform/eliza/src/eliza.c b/driver/platform/eliza/src/eliza.c
+index bd88bad2..842b34ea 100644
+--- a/driver/platform/eliza/src/eliza.c
++++ b/driver/platform/eliza/src/eliza.c
+@@ -1875,6 +1875,7 @@ static const struct clk_rst_table eliza_clk_reset_table[] = {
+ 	{ "bus",  0 },
+ 	{ "xo",   1 },
+ 	{ "core", 0 },
++	{ "vcodec0_core", 0, true },
+ };
+ 
+ /* name, start, size, secure, dma_coherant, region, dma_mask */
+diff --git a/driver/variant/iris33/src/msm_vidc_iris33.c b/driver/variant/iris33/src/msm_vidc_iris33.c
+index 903d76ac..7380255f 100644
+--- a/driver/variant/iris33/src/msm_vidc_iris33.c
++++ b/driver/variant/iris33/src/msm_vidc_iris33.c
+@@ -192,7 +192,6 @@ static const struct iris33_res_names iris33_res_vendor = {
+ 	.xo_rst    = "video_xo_reset",
+ };
+ 
+-/* qcom,eliza-iris: the binding has no MVS0 reset */
+ static const struct iris33_res_names iris33_res_eliza = {
+ 	.axi_clk   = "iface",
+ 	.ctl_clk   = "core",
+@@ -202,6 +201,7 @@ static const struct iris33_res_names iris33_res_eliza = {
+ 	.hw_gdsc   = "vcodec0",
+ 	.axi_rst   = "bus",
+ 	.ctl_rst   = "core",
++	.hw_rst    = "vcodec0_core",
+ 	.xo_rst    = "xo",
+ };
+ 
+-- 
+2.43.0
+

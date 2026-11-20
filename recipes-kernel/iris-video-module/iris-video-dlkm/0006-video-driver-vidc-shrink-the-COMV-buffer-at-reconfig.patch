@@ -1,0 +1,45 @@
+From 80953c33b3e08a0b599f0202155ab2608574f29f Mon Sep 17 00:00:00 2001
+From: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Date: Sun, 15 Nov 2026 09:30:00 +0000
+Subject: [PATCH 06/11] video-driver: vidc: shrink the COMV buffer at reconfig
+
+msm_vidc_get_internal_buffers marks an internal buffer for reuse when
+the size and count needed after a reconfig fit in the one already
+held; release, destroy and create then skip it, and for the decoder's
+COMV (collocated motion vector) buffer only HFI_PROP_COMV_BUFFER_COUNT
+carries the new count. A reconfig that needs a smaller COMV, such as a
+DRC to a lower resolution, keeps the larger buffer until the session
+closes.
+
+COMV normally grows at the first settings change, and with linear
+capture the split-mode FIRST_IPSC branch reallocates there anyway,
+which hid it.
+
+Reallocate decoder COMV whenever its size changes. The old buffer is
+released to the firmware and freed on its release done, as for a
+larger one.
+
+Signed-off-by: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Upstream-Status: Pending [qualcomm-linux/video-driver]
+---
+ driver/vidc/src/msm_vidc_driver.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/driver/vidc/src/msm_vidc_driver.c b/driver/vidc/src/msm_vidc_driver.c
+index e3e579d5..8dc4dd4e 100644
+--- a/driver/vidc/src/msm_vidc_driver.c
++++ b/driver/vidc/src/msm_vidc_driver.c
+@@ -3447,7 +3447,9 @@ int msm_vidc_get_internal_buffers(struct msm_vidc_inst *inst,
+ 		buffers->size = buf_size;
+ 		buffers->min_count = buf_count;
+ 	} else if (buf_size && buf_size <= buffers->size &&
+-		buf_count && buf_count <= buffers->min_count) {
++		buf_count && buf_count <= buffers->min_count &&
++		(buffer_type != MSM_VIDC_BUF_COMV || !is_decode_session(inst) ||
++		 buf_size == buffers->size)) {
+ 		buffers->reuse = true;
+ 	} else {
+ 		buffers->reuse = false;
+-- 
+2.43.0
+

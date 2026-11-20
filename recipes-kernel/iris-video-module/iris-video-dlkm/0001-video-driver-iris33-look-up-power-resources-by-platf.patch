@@ -1,0 +1,728 @@
+From 136e05543c0c1dd39b1eb15ef9eb93002e675c1f Mon Sep 17 00:00:00 2001
+From: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Date: Sat, 14 Nov 2026 03:46:45 -0800
+Subject: [PATCH 1/6] video-driver: iris33: look up power resources by platform
+
+The iris33 power sequences name their clocks, power domains and resets
+with the vendor device tree names (gcc_video_axi0_clk, iris-ctl,
+video_xo_reset, ...), and the resource helpers match those names
+against the platform tables, which follow the clock-names,
+power-domain-names and reset-names of the device tree. A platform
+probed from an upstream qcom-iris device tree names the same resources
+iface, core, vcodec0_core, venus, vcodec0, bus, core and xo, so the
+iris33 sequences cannot drive it: clock lookups fail, and gdsc_on
+silently skips a domain it does not find.
+
+Collect the names in one table that the power sequences and the clock
+scaling code read, selected by the variant init function, with the
+vendor names as the only entry for now. Allow the MVS0 reset to be
+absent, as the upstream binding has none. No functional change for the
+existing iris33 platforms.
+
+Signed-off-by: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Upstream-Status: Pending [qualcomm-linux/video-driver]
+---
+ driver/variant/iris33/inc/msm_vidc_iris33.h   |   1 +
+ driver/variant/iris33/src/msm_vidc_iris33.c   | 204 +++++++++++-------
+ .../iris33/src/msm_vidc_power_iris33.c        |  24 ++-
+ 3 files changed, 137 insertions(+), 92 deletions(-)
+
+diff --git a/driver/variant/iris33/inc/msm_vidc_iris33.h b/driver/variant/iris33/inc/msm_vidc_iris33.h
+index c7f1e159..52a0c90f 100644
+--- a/driver/variant/iris33/inc/msm_vidc_iris33.h
++++ b/driver/variant/iris33/inc/msm_vidc_iris33.h
+@@ -13,6 +13,7 @@ struct v4l2_ctrl;
+ #if defined(CONFIG_MSM_VIDC_PINEAPPLE) || defined(CONFIG_MSM_VIDC_SUN)
+ int msm_vidc_init_iris33(struct msm_vidc_core *core);
+ int msm_vidc_adjust_bitrate_boost_iris33(void *instance, struct v4l2_ctrl *ctrl);
++const char *msm_vidc_iris33_scaling_clk(void);
+ #else
+ static inline int msm_vidc_init_iris33(struct msm_vidc_core *core)
+ {
+diff --git a/driver/variant/iris33/src/msm_vidc_iris33.c b/driver/variant/iris33/src/msm_vidc_iris33.c
+index 1a19dfb0..4db9e0ef 100644
+--- a/driver/variant/iris33/src/msm_vidc_iris33.c
++++ b/driver/variant/iris33/src/msm_vidc_iris33.c
+@@ -162,6 +162,43 @@ typedef enum {
+ 
+ #define VCODEC_DMA_SPARE_3 0x87B8
+ 
++/*
++ * Resource names differ between the vendor device trees and the upstream
++ * qcom-iris binding; the hardware sequences are the same.
++ */
++struct iris33_res_names {
++	const char *axi_clk;
++	const char *ctl_clk;
++	const char *hw_clk;
++	const char *scale_clk;
++	const char *ctl_gdsc;
++	const char *hw_gdsc;
++	const char *axi_rst;
++	const char *ctl_rst;
++	const char *hw_rst;
++	const char *xo_rst;
++};
++
++static const struct iris33_res_names iris33_res_vendor = {
++	.axi_clk   = "gcc_video_axi0_clk",
++	.ctl_clk   = "video_cc_mvs0c_clk",
++	.hw_clk    = "video_cc_mvs0_clk",
++	.scale_clk = "video_cc_mvs0_clk_src",
++	.ctl_gdsc  = "iris-ctl",
++	.hw_gdsc   = "vcodec",
++	.axi_rst   = "video_axi_reset",
++	.ctl_rst   = "video_mvs0c_reset",
++	.hw_rst    = "video_mvs0_reset",
++	.xo_rst    = "video_xo_reset",
++};
++
++static const struct iris33_res_names *iris33_res = &iris33_res_vendor;
++
++const char *msm_vidc_iris33_scaling_clk(void)
++{
++	return iris33_res->scale_clk;
++}
++
+ static int __interrupt_init_iris33(struct msm_vidc_core *core)
+ {
+ 	u32 mask_val = 0;
+@@ -457,7 +494,7 @@ static int __power_off_iris33_hardware(struct msm_vidc_core *core)
+ 		return rc;
+ 
+ disable_power:
+-	rc = call_res_op(core, reset_control_acquire, core, "video_xo_reset");
++	rc = call_res_op(core, reset_control_acquire, core, iris33_res->xo_rst);
+ 	if (rc) {
+ 		d_vpr_e("%s: failed to acquire video_xo_reset control\n", __func__);
+ 		rc = 0;
+@@ -465,13 +502,13 @@ disable_power:
+ 		xo_reset_acquired = true;
+ 	}
+ 	/* power down process */
+-	rc = call_res_op(core, gdsc_off, core, "vcodec");
++	rc = call_res_op(core, gdsc_off, core, iris33_res->hw_gdsc);
+ 	if (rc) {
+ 		d_vpr_e("%s: disable regulator vcodec failed\n", __func__);
+ 		rc = 0;
+ 	}
+ 	if (xo_reset_acquired)
+-		call_res_op(core, reset_control_release, core, "video_xo_reset");
++		call_res_op(core, reset_control_release, core, iris33_res->xo_rst);
+ 
+ 	return rc;
+ }
+@@ -529,34 +566,38 @@ static int __power_off_iris33_controller(struct msm_vidc_core *core)
+ 		return rc;
+ 
+ 	/* assert and deassert axi and mvs0c resets */
+-	rc = call_res_op(core, reset_control_assert, core, "video_axi_reset");
++	rc = call_res_op(core, reset_control_assert, core, iris33_res->axi_rst);
+ 	if (rc)
+ 		d_vpr_e("%s: assert video_axi_reset failed\n", __func__);
+ 
+-	rc = call_res_op(core, reset_control_assert, core, "video_mvs0_reset");
+-	if (rc)
+-		d_vpr_e("%s: assert video_mvs0_reset failed\n", __func__);
++	if (iris33_res->hw_rst) {
++		rc = call_res_op(core, reset_control_assert, core, iris33_res->hw_rst);
++		if (rc)
++			d_vpr_e("%s: assert video_mvs0_reset failed\n", __func__);
++	}
+ 
+ 	/* set retain mem and peripheral before asset mvs0c reset */
+ 	rc = call_res_op(core, clk_set_flag, core,
+-		"video_cc_mvs0c_clk", MSM_VIDC_CLKFLAG_RETAIN_MEM);
++		iris33_res->ctl_clk, MSM_VIDC_CLKFLAG_RETAIN_MEM);
+ 	if (rc)
+ 		d_vpr_e("%s: set retain mem failed\n", __func__);
+ 	rc = call_res_op(core, clk_set_flag, core,
+-		"video_cc_mvs0c_clk", MSM_VIDC_CLKFLAG_RETAIN_PERIPH);
++		iris33_res->ctl_clk, MSM_VIDC_CLKFLAG_RETAIN_PERIPH);
+ 	if (rc)
+ 		d_vpr_e("%s: set retain peripheral failed\n", __func__);
+-	rc = call_res_op(core, reset_control_assert, core, "video_mvs0c_reset");
++	rc = call_res_op(core, reset_control_assert, core, iris33_res->ctl_rst);
+ 	if (rc)
+ 		d_vpr_e("%s: assert video_mvs0c_reset failed\n", __func__);
+ 	usleep_range(400, 500);
+-	rc = call_res_op(core, reset_control_deassert, core, "video_mvs0_reset");
+-	if (rc)
+-		d_vpr_e("%s: de-assert video_mvs0_reset failed\n", __func__);
+-	rc = call_res_op(core, reset_control_deassert, core, "video_axi_reset");
++	if (iris33_res->hw_rst) {
++		rc = call_res_op(core, reset_control_deassert, core, iris33_res->hw_rst);
++		if (rc)
++			d_vpr_e("%s: de-assert video_mvs0_reset failed\n", __func__);
++	}
++	rc = call_res_op(core, reset_control_deassert, core, iris33_res->axi_rst);
+ 	if (rc)
+ 		d_vpr_e("%s: de-assert video_axi_reset failed\n", __func__);
+-	rc = call_res_op(core, reset_control_deassert, core, "video_mvs0c_reset");
++	rc = call_res_op(core, reset_control_deassert, core, iris33_res->ctl_rst);
+ 	if (rc)
+ 		d_vpr_e("%s: de-assert video_mvs0c_reset failed\n", __func__);
+ 
+@@ -578,7 +619,7 @@ static int __power_off_iris33_controller(struct msm_vidc_core *core)
+ 	 * drivers (eva driver) operating on this shared reset clock
+ 	 * and AON_WRAPPER_SPARE register in parallel.
+ 	 */
+-	rc = call_res_op(core, reset_control_acquire, core, "video_xo_reset");
++	rc = call_res_op(core, reset_control_acquire, core, iris33_res->xo_rst);
+ 	if (rc) {
+ 		d_vpr_e("%s: failed to acquire video_xo_reset control\n", __func__);
+ 		goto skip_video_xo_reset;
+@@ -596,7 +637,7 @@ static int __power_off_iris33_controller(struct msm_vidc_core *core)
+ 		goto exit;
+ 
+ 	/* assert video_cc XO reset */
+-	rc = call_res_op(core, reset_control_assert, core, "video_xo_reset");
++	rc = call_res_op(core, reset_control_assert, core, iris33_res->xo_rst);
+ 	if (rc)
+ 		d_vpr_e("%s: assert video_xo_reset failed\n", __func__);
+ 
+@@ -608,7 +649,7 @@ static int __power_off_iris33_controller(struct msm_vidc_core *core)
+ 
+ 	/* De-assert video_cc XO reset */
+ 	usleep_range(80, 100);
+-	rc = call_res_op(core, reset_control_deassert, core, "video_xo_reset");
++	rc = call_res_op(core, reset_control_deassert, core, iris33_res->xo_rst);
+ 	if (rc)
+ 		d_vpr_e("%s: deassert video_xo_reset failed\n", __func__);
+ 
+@@ -618,7 +659,7 @@ static int __power_off_iris33_controller(struct msm_vidc_core *core)
+ 		goto exit;
+ 
+ 	/* release reset control for other consumers */
+-	rc = call_res_op(core, reset_control_release, core, "video_xo_reset");
++	rc = call_res_op(core, reset_control_release, core, iris33_res->xo_rst);
+ 	if (rc)
+ 		d_vpr_e("%s: failed to release video_xo_reset reset\n", __func__);
+ 
+@@ -629,7 +670,7 @@ skip_video_xo_reset:
+ 	if (rc)
+ 		return rc;
+ 
+-	rc = call_res_op(core, clk_disable, core, "video_cc_mvs0_clk");
++	rc = call_res_op(core, clk_disable, core, iris33_res->hw_clk);
+ 	if (rc) {
+ 		d_vpr_e("%s: disable unprepare video_cc_mvs0_clk failed\n", __func__);
+ 		rc = 0;
+@@ -637,17 +678,17 @@ skip_video_xo_reset:
+ 
+ 	/* remove retain mem and retain peripheral */
+ 	rc = call_res_op(core, clk_set_flag, core,
+-		"video_cc_mvs0c_clk", MSM_VIDC_CLKFLAG_NORETAIN_PERIPH);
++		iris33_res->ctl_clk, MSM_VIDC_CLKFLAG_NORETAIN_PERIPH);
+ 	if (rc)
+ 		d_vpr_e("%s: set noretain peripheral failed\n", __func__);
+ 
+ 	rc = call_res_op(core, clk_set_flag, core,
+-		"video_cc_mvs0c_clk", MSM_VIDC_CLKFLAG_NORETAIN_MEM);
++		iris33_res->ctl_clk, MSM_VIDC_CLKFLAG_NORETAIN_MEM);
+ 	if (rc)
+ 		d_vpr_e("%s: set noretain mem failed\n", __func__);
+ 
+ 	/* Turn off MVP MVS0C core clock */
+-	rc = call_res_op(core, clk_disable, core, "video_cc_mvs0c_clk");
++	rc = call_res_op(core, clk_disable, core, iris33_res->ctl_clk);
+ 	if (rc) {
+ 		d_vpr_e("%s: disable unprepare video_cc_mvs0c_clk failed\n", __func__);
+ 		rc = 0;
+@@ -656,7 +697,7 @@ skip_video_xo_reset:
+ 	if (!is_core_state(core, MSM_VIDC_CORE_ERROR))
+ 		goto power_down;
+ 
+-	rc = call_res_op(core, reset_control_acquire, core, "video_xo_reset");
++	rc = call_res_op(core, reset_control_acquire, core, iris33_res->xo_rst);
+ 	if (rc) {
+ 		d_vpr_e("%s: failed to acquire video_xo_reset control\n", __func__);
+ 		rc = 0;
+@@ -664,54 +705,54 @@ skip_video_xo_reset:
+ 		xo_reset_acquired = true;
+ 	}
+ 	/* power cycle process to recover from NoC error */
+-	rc = call_res_op(core, gdsc_off, core, "iris-ctl");
++	rc = call_res_op(core, gdsc_off, core, iris33_res->ctl_gdsc);
+ 	if (rc) {
+ 		d_vpr_e("%s: disable regulator iris-ctl failed\n", __func__);
+ 		rc = 0;
+ 	}
+ 	if (xo_reset_acquired) {
+ 		xo_reset_acquired = false;
+-		call_res_op(core, reset_control_release, core, "video_xo_reset");
++		call_res_op(core, reset_control_release, core, iris33_res->xo_rst);
+ 	}
+ 
+-	rc = call_res_op(core, reset_control_acquire, core, "video_xo_reset");
++	rc = call_res_op(core, reset_control_acquire, core, iris33_res->xo_rst);
+ 	if (rc) {
+ 		d_vpr_e("%s: failed to acquire video_xo_reset control\n", __func__);
+ 		rc = 0;
+ 	} else {
+ 		xo_reset_acquired = true;
+ 	}
+-	call_res_op(core, gdsc_on, core, "iris-ctl");
++	call_res_op(core, gdsc_on, core, iris33_res->ctl_gdsc);
+ 	if (xo_reset_acquired) {
+ 		xo_reset_acquired = false;
+-		call_res_op(core, reset_control_release, core, "video_xo_reset");
++		call_res_op(core, reset_control_release, core, iris33_res->xo_rst);
+ 	}
+ 
+-	rc = call_res_op(core, clk_enable, core, "video_cc_mvs0c_clk");
++	rc = call_res_op(core, clk_enable, core, iris33_res->ctl_clk);
+ 
+ 	/* assert and deassert axi and mvs0c resets */
+-	rc = call_res_op(core, reset_control_assert, core, "video_axi_reset");
++	rc = call_res_op(core, reset_control_assert, core, iris33_res->axi_rst);
+ 	if (rc)
+ 		d_vpr_e("%s: assert video_axi_reset failed\n", __func__);
+ 
+ 	/* set retain mem and peripheral before asset mvs0c reset */
+ 	rc = call_res_op(core, clk_set_flag, core,
+-			 "video_cc_mvs0c_clk", MSM_VIDC_CLKFLAG_RETAIN_MEM);
++			 iris33_res->ctl_clk, MSM_VIDC_CLKFLAG_RETAIN_MEM);
+ 	if (rc)
+ 		d_vpr_e("%s: set retain mem failed\n", __func__);
+ 	rc = call_res_op(core, clk_set_flag, core,
+-			 "video_cc_mvs0c_clk", MSM_VIDC_CLKFLAG_RETAIN_PERIPH);
++			 iris33_res->ctl_clk, MSM_VIDC_CLKFLAG_RETAIN_PERIPH);
+ 	if (rc)
+ 		d_vpr_e("%s: set retain peripheral failed\n", __func__);
+-	rc = call_res_op(core, reset_control_assert, core, "video_mvs0c_reset");
++	rc = call_res_op(core, reset_control_assert, core, iris33_res->ctl_rst);
+ 	if (rc)
+ 		d_vpr_e("%s: assert video_mvs0c_reset failed\n", __func__);
+ 	usleep_range(400, 500);
+ 
+-	rc = call_res_op(core, reset_control_deassert, core, "video_axi_reset");
++	rc = call_res_op(core, reset_control_deassert, core, iris33_res->axi_rst);
+ 	if (rc)
+ 		d_vpr_e("%s: de-assert video_axi_reset failed\n", __func__);
+-	rc = call_res_op(core, reset_control_deassert, core, "video_mvs0c_reset");
++	rc = call_res_op(core, reset_control_deassert, core, iris33_res->ctl_rst);
+ 	if (rc)
+ 		d_vpr_e("%s: de-assert video_mvs0c_reset failed\n", __func__);
+ 
+@@ -723,22 +764,22 @@ skip_video_xo_reset:
+ 	 */
+ 	writel_relaxed(0x0, (u8 *)core->resource->register_base_addr + WRAPPER_CORE_POWER_CONTROL);
+ 
+-	rc = call_res_op(core, reset_control_acquire, core, "video_xo_reset");
++	rc = call_res_op(core, reset_control_acquire, core, iris33_res->xo_rst);
+ 	if (rc) {
+ 		d_vpr_e("%s: failed to acquire video_xo_reset control\n", __func__);
+ 		rc = 0;
+ 	} else {
+ 		xo_reset_acquired = true;
+ 	}
+-	rc = call_res_op(core, gdsc_on, core, "vcodec");
++	rc = call_res_op(core, gdsc_on, core, iris33_res->hw_gdsc);
+ 	if (xo_reset_acquired) {
+ 		xo_reset_acquired = false;
+-		call_res_op(core, reset_control_release, core, "video_xo_reset");
++		call_res_op(core, reset_control_release, core, iris33_res->xo_rst);
+ 	}
+ 	if (rc)
+ 		return rc;
+ 
+-	rc = call_res_op(core, clk_enable, core, "video_cc_mvs0_clk");
++	rc = call_res_op(core, clk_enable, core, iris33_res->hw_clk);
+ 	if (rc)
+ 		return rc;
+ 
+@@ -787,41 +828,41 @@ skip_video_xo_reset:
+ 			return rc;
+ 	}
+ 
+-	rc = call_res_op(core, clk_disable, core, "video_cc_mvs0_clk");
++	rc = call_res_op(core, clk_disable, core, iris33_res->hw_clk);
+ 	if (rc) {
+ 		d_vpr_e("%s: disable unprepare video_cc_mvs0_clk failed\n", __func__);
+ 		rc = 0;
+ 	}
+ 
+-	rc = call_res_op(core, reset_control_acquire, core, "video_xo_reset");
++	rc = call_res_op(core, reset_control_acquire, core, iris33_res->xo_rst);
+ 	if (rc) {
+ 		d_vpr_e("%s: failed to acquire video_xo_reset control\n", __func__);
+ 		rc = 0;
+ 	} else {
+ 		xo_reset_acquired = true;
+ 	}
+-	rc = call_res_op(core, gdsc_off, core, "vcodec");
++	rc = call_res_op(core, gdsc_off, core, iris33_res->hw_gdsc);
+ 	if (rc) {
+ 		d_vpr_e("%s: disable regulator vcodec failed\n", __func__);
+ 		rc = 0;
+ 	}
+ 	if (xo_reset_acquired) {
+ 		xo_reset_acquired = false;
+-		call_res_op(core, reset_control_release, core, "video_xo_reset");
++		call_res_op(core, reset_control_release, core, iris33_res->xo_rst);
+ 	}
+ 	/* remove retain mem and retain peripheral */
+ 	rc = call_res_op(core, clk_set_flag, core,
+-			 "video_cc_mvs0c_clk", MSM_VIDC_CLKFLAG_NORETAIN_PERIPH);
++			 iris33_res->ctl_clk, MSM_VIDC_CLKFLAG_NORETAIN_PERIPH);
+ 	if (rc)
+ 		d_vpr_e("%s: set noretain peripheral failed\n", __func__);
+ 
+ 	rc = call_res_op(core, clk_set_flag, core,
+-			 "video_cc_mvs0c_clk", MSM_VIDC_CLKFLAG_NORETAIN_MEM);
++			 iris33_res->ctl_clk, MSM_VIDC_CLKFLAG_NORETAIN_MEM);
+ 	if (rc)
+ 		d_vpr_e("%s: set noretain mem failed\n", __func__);
+ 
+ 	/* Turn off MVP MVS0C core clock */
+-	rc = call_res_op(core, clk_disable, core, "video_cc_mvs0c_clk");
++	rc = call_res_op(core, clk_disable, core, iris33_res->ctl_clk);
+ 	if (rc) {
+ 		d_vpr_e("%s: disable unprepare video_cc_mvs0c_clk failed\n", __func__);
+ 		rc = 0;
+@@ -829,25 +870,25 @@ skip_video_xo_reset:
+ 
+ power_down:
+ 	/* power down process */
+-	rc = call_res_op(core, reset_control_acquire, core, "video_xo_reset");
++	rc = call_res_op(core, reset_control_acquire, core, iris33_res->xo_rst);
+ 	if (rc) {
+ 		d_vpr_e("%s: failed to acquire video_xo_reset control\n", __func__);
+ 		rc = 0;
+ 	} else {
+ 		xo_reset_acquired = true;
+ 	}
+-	rc = call_res_op(core, gdsc_off, core, "iris-ctl");
++	rc = call_res_op(core, gdsc_off, core, iris33_res->ctl_gdsc);
+ 	if (rc) {
+ 		d_vpr_e("%s: disable regulator iris-ctl failed\n", __func__);
+ 		rc = 0;
+ 	}
+ 	if (xo_reset_acquired) {
+ 		xo_reset_acquired = false;
+-		call_res_op(core, reset_control_release, core, "video_xo_reset");
++		call_res_op(core, reset_control_release, core, iris33_res->xo_rst);
+ 	}
+ 
+ 	/* Turn off GCC AXI clock */
+-	rc = call_res_op(core, clk_disable, core, "gcc_video_axi0_clk");
++	rc = call_res_op(core, clk_disable, core, iris33_res->axi_clk);
+ 	if (rc) {
+ 		d_vpr_e("%s: disable unprepare gcc_video_axi0_clk failed\n", __func__);
+ 		rc = 0;
+@@ -856,7 +897,7 @@ power_down:
+ 	return rc;
+ 
+ exit:
+-	call_res_op(core, reset_control_release, core, "video_xo_reset");
++	call_res_op(core, reset_control_release, core, iris33_res->xo_rst);
+ 	return rc;
+ }
+ 
+@@ -898,7 +939,7 @@ static int __power_on_iris33_controller(struct msm_vidc_core *core)
+ 	int rc = 0;
+ 	bool xo_reset_acquired = false;
+ 
+-	rc = call_res_op(core, reset_control_acquire, core, "video_xo_reset");
++	rc = call_res_op(core, reset_control_acquire, core, iris33_res->xo_rst);
+ 	if (rc) {
+ 		goto fail_assert_xo_reset;
+ 	}
+@@ -906,55 +947,55 @@ static int __power_on_iris33_controller(struct msm_vidc_core *core)
+ 		xo_reset_acquired = true;
+ 	}
+ 
+-	rc = call_res_op(core, gdsc_on, core, "iris-ctl");
++	rc = call_res_op(core, gdsc_on, core, iris33_res->ctl_gdsc);
+ 	if (rc)
+ 		goto fail_regulator;
+ 
+-	rc = call_res_op(core, reset_control_release, core, "video_xo_reset");
++	rc = call_res_op(core, reset_control_release, core, iris33_res->xo_rst);
+ 	if (rc) {
+ 		d_vpr_e("%s: failed to release video_xo_reset reset\n", __func__);
+ 		goto fail_reset_assert_axi;
+ 	}
+ 	xo_reset_acquired = false;
+ 
+-	rc = call_res_op(core, reset_control_assert, core, "video_axi_reset");
++	rc = call_res_op(core, reset_control_assert, core, iris33_res->axi_rst);
+ 	if (rc)
+ 		goto fail_reset_assert_axi;
+-	rc = call_res_op(core, reset_control_assert, core, "video_mvs0c_reset");
++	rc = call_res_op(core, reset_control_assert, core, iris33_res->ctl_rst);
+ 	if (rc)
+ 		goto fail_reset_assert_mvs0c;
+ 	/* add usleep between assert and deassert */
+ 	usleep_range(1000, 1100);
+-	rc = call_res_op(core, reset_control_deassert, core, "video_axi_reset");
++	rc = call_res_op(core, reset_control_deassert, core, iris33_res->axi_rst);
+ 	if (rc)
+ 		goto fail_reset_deassert_axi;
+-	rc = call_res_op(core, reset_control_deassert, core, "video_mvs0c_reset");
++	rc = call_res_op(core, reset_control_deassert, core, iris33_res->ctl_rst);
+ 	if (rc)
+ 		goto fail_reset_deassert_mvs0c;
+ 
+-	rc = call_res_op(core, clk_enable, core, "gcc_video_axi0_clk");
++	rc = call_res_op(core, clk_enable, core, iris33_res->axi_clk);
+ 	if (rc)
+ 		goto fail_clk_axi;
+ 
+-	rc = call_res_op(core, clk_enable, core, "video_cc_mvs0c_clk");
++	rc = call_res_op(core, clk_enable, core, iris33_res->ctl_clk);
+ 	if (rc)
+ 		goto fail_clk_controller;
+ 
+ 	return 0;
+ 
+ fail_clk_controller:
+-	call_res_op(core, clk_disable, core, "gcc_video_axi0_clk");
++	call_res_op(core, clk_disable, core, iris33_res->axi_clk);
+ fail_clk_axi:
+ fail_reset_deassert_mvs0c:
+ fail_reset_deassert_axi:
+-	call_res_op(core, reset_control_deassert, core, "video_mvs0c_reset");
++	call_res_op(core, reset_control_deassert, core, iris33_res->ctl_rst);
+ fail_reset_assert_mvs0c:
+-	call_res_op(core, reset_control_deassert, core, "video_axi_reset");
++	call_res_op(core, reset_control_deassert, core, iris33_res->axi_rst);
+ fail_reset_assert_axi:
+-	call_res_op(core, gdsc_off, core, "iris-ctl");
++	call_res_op(core, gdsc_off, core, iris33_res->ctl_gdsc);
+ fail_regulator:
+ 	if (xo_reset_acquired) {
+-		call_res_op(core, reset_control_release, core, "video_xo_reset");
++		call_res_op(core, reset_control_release, core, iris33_res->xo_rst);
+ 	}
+ fail_assert_xo_reset:
+ 	return rc;
+@@ -965,7 +1006,7 @@ static int __power_on_iris33_hardware(struct msm_vidc_core *core)
+ 	int rc = 0;
+ 	bool xo_reset_acquired = false;
+ 
+-	rc = call_res_op(core, reset_control_acquire, core, "video_xo_reset");
++	rc = call_res_op(core, reset_control_acquire, core, iris33_res->xo_rst);
+ 	if (rc) {
+ 		goto fail_assert_xo_reset;
+ 	}
+@@ -981,11 +1022,11 @@ static int __power_on_iris33_hardware(struct msm_vidc_core *core)
+ 	 */
+ 	writel_relaxed(0x0, (u8 *)core->resource->register_base_addr + WRAPPER_CORE_POWER_CONTROL);
+ 
+-	rc = call_res_op(core, gdsc_on, core, "vcodec");
++	rc = call_res_op(core, gdsc_on, core, iris33_res->hw_gdsc);
+ 	if (rc)
+ 		goto fail_regulator;
+ 
+-	rc = call_res_op(core, reset_control_release, core, "video_xo_reset");
++	rc = call_res_op(core, reset_control_release, core, iris33_res->xo_rst);
+ 	if (rc) {
+ 		d_vpr_e("%s: failed to release video_xo_reset reset\n", __func__);
+ 		goto fail_power_on_substate;
+@@ -1000,7 +1041,7 @@ static int __power_on_iris33_hardware(struct msm_vidc_core *core)
+ 	if (rc)
+ 		goto fail_sw_ctrl;
+ 
+-	rc = call_res_op(core, clk_enable, core, "video_cc_mvs0_clk");
++	rc = call_res_op(core, clk_enable, core, iris33_res->hw_clk);
+ 	if (rc)
+ 		goto fail_clk_controller;
+ 
+@@ -1010,10 +1051,10 @@ fail_clk_controller:
+ 	call_res_op(core, gdsc_hw_ctrl, core);
+ fail_sw_ctrl:
+ fail_power_on_substate:
+-	call_res_op(core, gdsc_off, core, "vcodec");
++	call_res_op(core, gdsc_off, core, iris33_res->hw_gdsc);
+ fail_regulator:
+ 	if (xo_reset_acquired)
+-		call_res_op(core, reset_control_release, core, "video_xo_reset");
++		call_res_op(core, reset_control_release, core, iris33_res->xo_rst);
+ fail_assert_xo_reset:
+ 	return rc;
+ }
+@@ -1065,7 +1106,7 @@ static int __power_on_iris33(struct msm_vidc_core *core)
+ 	 * access failure, so acquire video_xo_reset to ensure EVA module is
+ 	 * not doing assert or de-assert on video_xo_reset.
+ 	 */
+-	rc = call_res_op(core, reset_control_acquire, core, "video_xo_reset");
++	rc = call_res_op(core, reset_control_acquire, core, iris33_res->xo_rst);
+ 	if (rc) {
+ 		d_vpr_e("%s: failed to acquire video_xo_reset control\n", __func__);
+ 		goto fail_assert_xo_reset;
+@@ -1134,7 +1175,7 @@ static int __power_on_iris33(struct msm_vidc_core *core)
+ 	}
+ 
+ 	/* release reset control for other consumers */
+-	rc = call_res_op(core, reset_control_release, core, "video_xo_reset");
++	rc = call_res_op(core, reset_control_release, core, iris33_res->xo_rst);
+ 	if (rc) {
+ 		d_vpr_e("%s: failed to release video_xo_reset reset\n", __func__);
+ 		goto fail_deassert_xo_reset;
+@@ -1147,7 +1188,7 @@ static int __power_on_iris33(struct msm_vidc_core *core)
+ 	return rc;
+ 
+ fail_program_noc_regs:
+-	call_res_op(core, reset_control_release, core, "video_xo_reset");
++	call_res_op(core, reset_control_release, core, iris33_res->xo_rst);
+ fail_deassert_xo_reset:
+ fail_assert_xo_reset:
+ fail_power_on_hardware:
+@@ -1248,7 +1289,7 @@ static int __hw_ctrl_gdsc_iris33(struct msm_vidc_core *core)
+ {
+ 	int rc = 0;
+ 
+-	rc = call_res_op(core, reset_control_acquire, core, "video_xo_reset");
++	rc = call_res_op(core, reset_control_acquire, core, iris33_res->xo_rst);
+ 	if (rc) {
+ 		d_vpr_e("%s: failed to acquire video_xo_reset control\n", __func__);
+ 		goto fail_assert_xo_reset;
+@@ -1256,7 +1297,7 @@ static int __hw_ctrl_gdsc_iris33(struct msm_vidc_core *core)
+ 
+ 	rc = call_res_op(core, gdsc_hw_ctrl, core);
+ 
+-	rc = call_res_op(core, reset_control_release, core, "video_xo_reset");
++	rc = call_res_op(core, reset_control_release, core, iris33_res->xo_rst);
+ 	if (rc)
+ 		d_vpr_e("%s: failed to release video_xo_reset reset\n", __func__);
+ 
+@@ -1269,7 +1310,7 @@ static int __sw_ctrl_gdsc_iris33(struct msm_vidc_core *core)
+ 	int rc = 0;
+ 	bool xo_reset_acquired = false;
+ 
+-	rc = call_res_op(core, reset_control_acquire, core, "video_xo_reset");
++	rc = call_res_op(core, reset_control_acquire, core, iris33_res->xo_rst);
+ 	if (rc) {
+ 		d_vpr_e("%s: failed to acquire video_xo_reset control\n", __func__);
+ 	} else {
+@@ -1279,7 +1320,7 @@ static int __sw_ctrl_gdsc_iris33(struct msm_vidc_core *core)
+ 	rc = call_res_op(core, gdsc_sw_ctrl, core);
+ 
+ 	if (xo_reset_acquired) {
+-		call_res_op(core, reset_control_release, core, "video_xo_reset");
++		call_res_op(core, reset_control_release, core, iris33_res->xo_rst);
+ 	}
+ 
+ 	return rc;
+@@ -1434,7 +1475,7 @@ static int __noc_error_info_iris33(struct msm_vidc_core *core)
+ 	 * while reading noc registers
+ 	 */
+ 	d_vpr_e("%s: read NOC ERR LOG registers\n", __func__);
+-	rc = call_res_op(core, reset_control_acquire, core, "video_xo_reset");
++	rc = call_res_op(core, reset_control_acquire, core, iris33_res->xo_rst);
+ 	if (rc) {
+ 		d_vpr_e("%s: failed to acquire video_xo_reset control\n", __func__);
+ 		goto fail_assert_xo_reset;
+@@ -1446,7 +1487,7 @@ static int __noc_error_info_iris33(struct msm_vidc_core *core)
+ 		rc = __read_noc_err_register_iris33_2p(core);
+ 
+ 	/* release reset control for other consumers */
+-	rc = call_res_op(core, reset_control_release, core, "video_xo_reset");
++	rc = call_res_op(core, reset_control_release, core, iris33_res->xo_rst);
+ 	if (rc) {
+ 		d_vpr_e("%s: failed to release video_xo_reset reset\n", __func__);
+ 		goto fail_deassert_xo_reset;
+@@ -1809,6 +1850,7 @@ static struct msm_vidc_session_ops msm_session_ops = {
+ int msm_vidc_init_iris33(struct msm_vidc_core *core)
+ {
+ 	d_vpr_h("%s()\n", __func__);
++	iris33_res = &iris33_res_vendor;
+ 	core->venus_ops = &iris33_ops;
+ 	core->session_ops = &msm_session_ops;
+ 
+diff --git a/driver/variant/iris33/src/msm_vidc_power_iris33.c b/driver/variant/iris33/src/msm_vidc_power_iris33.c
+index 9ea14ba7..5f9af5c7 100644
+--- a/driver/variant/iris33/src/msm_vidc_power_iris33.c
++++ b/driver/variant/iris33/src/msm_vidc_power_iris33.c
+@@ -7,6 +7,7 @@
+ #include <linux/types.h>
+ 
+ #include "msm_vidc_power_iris33.h"
++#include "msm_vidc_iris33.h"
+ #include "msm_vidc_driver.h"
+ #include "msm_vidc_inst.h"
+ #include "msm_vidc_core.h"
+@@ -404,7 +405,7 @@ static bool is_vpp_cycles_close_to_freq_corner(struct msm_vidc_core *core,
+ 
+ 	vpp_min_freq = vpp_min_freq * 1000000; /* convert to hz */
+ 
+-	closest_freq_upper_corner = get_clock_freq(core, "video_cc_mvs0_clk_src",
++	closest_freq_upper_corner = get_clock_freq(core, msm_vidc_iris33_scaling_clk(),
+ 						   get_max_clock_index(core));
+ 
+ 	/* return true if vpp_min_freq is more than max frequency */
+@@ -412,8 +413,8 @@ static bool is_vpp_cycles_close_to_freq_corner(struct msm_vidc_core *core,
+ 		return true;
+ 
+ 	/* get the closest freq corner for vpp_min_freq */
+-	for (i = 0; i < get_clock_freq_count(core, "video_cc_mvs0_clk_src"); i++) {
+-		freq = get_clock_freq(core, "video_cc_mvs0_clk_src", i);
++	for (i = 0; i < get_clock_freq_count(core, msm_vidc_iris33_scaling_clk()); i++) {
++		freq = get_clock_freq(core, msm_vidc_iris33_scaling_clk(), i);
+ 		if (vpp_min_freq <= freq)
+ 			closest_freq_upper_corner = freq;
+ 		else
+@@ -494,8 +495,8 @@ static int msm_vidc_calc_freq_iris33_new(struct msm_vidc_inst *inst,
+ 		 */
+ 	} else {
+ 		/* limit to NOM, index 0 is TURBO, index 1 is NOM clock rate */
+-		if (get_clock_freq_count(core, "video_cc_mvs0_clk_src") >= 2) {
+-			nom_freq = get_clock_freq(core, "video_cc_mvs0_clk_src", 1);
++		if (get_clock_freq_count(core, msm_vidc_iris33_scaling_clk()) >= 2) {
++			nom_freq = get_clock_freq(core, msm_vidc_iris33_scaling_clk(), 1);
+ 			if (freq > nom_freq)
+ 				freq = nom_freq;
+ 		}
+@@ -553,7 +554,7 @@ static int get_clock_corner_index(struct msm_vidc_core *core, u64 freq)
+ 		 * keep checking from lowest to highest rate until
+ 		 * table rate >= requested rate
+ 		 */
+-		if (freq && !strcmp(cl->name, "video_cc_mvs0_clk_src")) {
++		if (freq && !strcmp(cl->name, msm_vidc_iris33_scaling_clk())) {
+ 			for (idx = cl->freq_count - 1; idx > 0; idx--) {
+ 				rate = cl->freq[idx];
+ 				if (rate >= freq)
+@@ -633,7 +634,8 @@ int msm_vidc_scale_clocks_iris33(struct msm_vidc_inst *inst)
+ 	    is_sub_state(inst, MSM_VIDC_DRC) ||
+ 	    is_sub_state(inst, MSM_VIDC_DRAIN)) {
+ 		inst->power.min_freq =
+-			get_clock_freq(core, "video_cc_mvs0_clk_src", get_max_clock_index(core));
++			get_clock_freq(core, msm_vidc_iris33_scaling_clk(),
++				       get_max_clock_index(core));
+ 		inst->power.dcvs_flags = 0;
+ 	} else if (msm_vidc_clock_voting ||
+ 		   (msm_vidc_vpp_clock_voting && msm_vidc_apv_clock_voting &&
+@@ -801,7 +803,7 @@ int msm_vidc_calc_freq_iris33_legacy(struct msm_vidc_inst *inst,
+ 			freq_entry = bitrate_entry;
+ 
+ 			freq_tbl_value =
+-				get_clock_freq(core, "video_cc_mvs0_clk_src", freq_entry) /
++				get_clock_freq(core, msm_vidc_iris33_scaling_clk(), freq_entry) /
+ 				1000000;
+ 
+ 			input_bitrate_mbps = fps * clock_scaling_data->data_size *
+@@ -859,7 +861,7 @@ int msm_vidc_calc_freq_iris33_legacy(struct msm_vidc_inst *inst,
+ 						MSM_VIDC_STAGE_2 &&
+ 					inst->capabilities[PIPE].value == 4 &&
+ 					bitrate > 90000000)
+-				vsp_cycles = get_clock_freq(core, "video_cc_mvs0_clk_src",
++				vsp_cycles = get_clock_freq(core, msm_vidc_iris33_scaling_clk(),
+ 							    get_max_clock_index(core));
+ 		}
+ 	} else {
+@@ -886,8 +888,8 @@ int msm_vidc_calc_freq_iris33_legacy(struct msm_vidc_inst *inst,
+ 		 */
+ 	} else {
+ 		/* limit to NOM, index 0 is TURBO, index 1 is NOM clock rate */
+-		if (get_clock_freq_count(core, "video_cc_mvs0_clk_src") >= 2) {
+-			nom_freq = get_clock_freq(core, "video_cc_mvs0_clk_src", 1);
++		if (get_clock_freq_count(core, msm_vidc_iris33_scaling_clk()) >= 2) {
++			nom_freq = get_clock_freq(core, msm_vidc_iris33_scaling_clk(), 1);
+ 			if (freq > nom_freq)
+ 				freq = nom_freq;
+ 		}
+-- 
+2.43.0
+

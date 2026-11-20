@@ -1,0 +1,50 @@
+From fbfaab7227abeb236f81156a1ba9bab547e644a7 Mon Sep 17 00:00:00 2001
+From: Adesh Dahate <dahate@qti.qualcomm.com>
+Date: Tue, 10 Nov 2026 21:44:37 +0530
+Subject: [PATCH 4/6] video-driver: Remove interlaced frame handling from
+ buffer size calculation
+
+The CODED_FRAMES capability was being incorrectly updated with raw
+values after DRC (Dynamic Resolution Change), causing the driver to
+enable interlaced mode by default during buffer size calculation.
+This led to internal errors for NV12/NV21 formats which don't support
+interlaced format.
+
+Signed-off-by: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Upstream-Status: Submitted [https://github.com/qualcomm-linux/video-driver/pull/161]
+---
+ driver/vidc/src/msm_vidc_buffer.c    | 3 +--
+ driver/vidc/src/venus_hfi_response.c | 3 ---
+ 2 files changed, 1 insertion(+), 5 deletions(-)
+
+diff --git a/driver/vidc/src/msm_vidc_buffer.c b/driver/vidc/src/msm_vidc_buffer.c
+index 0d26564d..66e2e08b 100644
+--- a/driver/vidc/src/msm_vidc_buffer.c
++++ b/driver/vidc/src/msm_vidc_buffer.c
+@@ -325,8 +325,7 @@ u32 msm_vidc_encoder_input_size(struct msm_vidc_inst *inst)
+ 		width = ALIGN(width, inst->capabilities[GRID_SIZE].value);
+ 		height = ALIGN(height, inst->capabilities[GRID_SIZE].value);
+ 	}
+-	size = video_buffer_size(colorformat, width, height,
+-				 inst->capabilities[CODED_FRAMES].value == CODED_FRAMES_INTERLACE);
++	size = video_buffer_size(colorformat, width, height, false);
+ 	return size;
+ }
+ 
+diff --git a/driver/vidc/src/venus_hfi_response.c b/driver/vidc/src/venus_hfi_response.c
+index 02cde23e..cab234dc 100644
+--- a/driver/vidc/src/venus_hfi_response.c
++++ b/driver/vidc/src/venus_hfi_response.c
+@@ -2048,9 +2048,6 @@ static int handle_property_with_payload(struct msm_vidc_inst *inst,
+ 		break;
+ 	case HFI_PROP_CODED_FRAMES:
+ 		inst->subcr_params[port].coded_frames = payload_ptr[0];
+-		msm_vidc_update_cap_value(inst, CODED_FRAMES,
+-					  inst->subcr_params[port].coded_frames,
+-					  __func__);
+ 		break;
+ 	case HFI_PROP_BUFFER_FW_MIN_OUTPUT_COUNT:
+ 		inst->subcr_params[port].fw_min_count = payload_ptr[0];
+-- 
+2.43.0
+

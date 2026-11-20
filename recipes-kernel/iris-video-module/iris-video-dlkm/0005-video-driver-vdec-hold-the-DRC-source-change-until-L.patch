@@ -1,0 +1,162 @@
+From ae8552a2910971fd91f2b6131c12b0228eb947a9 Mon Sep 17 00:00:00 2001
+From: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Date: Sat, 14 Nov 2026 22:00:00 -0800
+Subject: [PATCH 5/6] video-driver: vdec: hold the DRC source change until LAST
+
+An input port settings change while the capture queue streams (DRC)
+makes msm_vdec_input_port_settings_change queue
+V4L2_EVENT_SOURCE_CHANGE at once. FFmpeg's v4l2_handle_event answers an
+unchanged format with V4L2_DEC_CMD_START straight away. Before the psc
+last flag msm_vidc_streaming_state refuses it with -EBUSY and nothing
+resumes; after the last flag but before the client dequeues the LAST
+capture buffer, START clears the vb2 LAST state, the dequeue of LAST
+sets it again and every later DQBUF fails. The session stalls or ends
+after one frame:
+
+  msm_vidc_streaming_state: (CMD_START) not allowed, sub_state (DRC INPUT_PAUSE )
+  videobuf2_common: last buffer dequeued already
+
+During DRC, keep the event pending until the LAST capture buffer is
+dequeued, so a client acting on it finds LAST already consumed. Send it
+earlier when no capture buffer will carry LAST (last flag info packet,
+or LAST_FLAG_EVENT_ENABLE) and when the capture queue stops; drop it
+when the client resumes without it. This applies to every platform
+using the common vdec code.
+
+Signed-off-by: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Upstream-Status: Pending [qualcomm-linux/video-driver]
+---
+ driver/vidc/inc/msm_vidc_driver.h    |  1 +
+ driver/vidc/inc/msm_vidc_inst.h      |  1 +
+ driver/vidc/src/msm_vdec.c           | 10 ++++++++++
+ driver/vidc/src/msm_vidc.c           |  7 +++++++
+ driver/vidc/src/msm_vidc_driver.c    | 15 +++++++++++++++
+ driver/vidc/src/venus_hfi_response.c |  3 +++
+ 6 files changed, 37 insertions(+)
+
+diff --git a/driver/vidc/inc/msm_vidc_driver.h b/driver/vidc/inc/msm_vidc_driver.h
+index fb466c0a..4ccf569d 100644
+--- a/driver/vidc/inc/msm_vidc_driver.h
++++ b/driver/vidc/inc/msm_vidc_driver.h
+@@ -680,6 +680,7 @@ int msm_vidc_process_stop_done(struct msm_vidc_inst *inst,
+ int msm_vidc_process_drain_done(struct msm_vidc_inst *inst);
+ int msm_vidc_process_drain_last_flag(struct msm_vidc_inst *inst);
+ int msm_vidc_process_psc_last_flag(struct msm_vidc_inst *inst);
++void msm_vidc_send_drc_event(struct msm_vidc_inst *inst);
+ int msm_vidc_get_mbs_per_frame(struct msm_vidc_inst *inst);
+ int msm_vidc_set_core_id(struct msm_vidc_inst *inst);
+ u32 msm_vidc_get_max_bitrate(struct msm_vidc_inst *inst);
+diff --git a/driver/vidc/inc/msm_vidc_inst.h b/driver/vidc/inc/msm_vidc_inst.h
+index e80b2229..834a45d0 100644
+--- a/driver/vidc/inc/msm_vidc_inst.h
++++ b/driver/vidc/inc/msm_vidc_inst.h
+@@ -73,6 +73,7 @@ struct msm_vidc_inst {
+ 	struct mutex                       ctx_q_lock;
+ 	struct mutex                       client_lock;
+ 	enum msm_vidc_state                state;
++	bool                               drc_event_pending;
+ 	int                              (*event_handle)(struct msm_vidc_inst *inst,
+ 							 enum msm_vidc_event event,
+ 							 void *data);
+diff --git a/driver/vidc/src/msm_vdec.c b/driver/vidc/src/msm_vdec.c
+index c80fa07c..1d3535ad 100644
+--- a/driver/vidc/src/msm_vdec.c
++++ b/driver/vidc/src/msm_vdec.c
+@@ -1566,6 +1566,16 @@ int msm_vdec_input_port_settings_change(struct msm_vidc_inst *inst)
+ 	if (rc)
+ 		return rc;
+ 
++	/*
++	 * During DRC a START sent on this event would race the LAST capture
++	 * buffer: msm_vidc_send_drc_event runs once LAST is dequeued, the
++	 * capture queue stops, or the last flag comes without a LAST buffer
++	 */
++	if (is_sub_state(inst, MSM_VIDC_DRC)) {
++		inst->drc_event_pending = true;
++		return 0;
++	}
++
+ 	event.type = V4L2_EVENT_SOURCE_CHANGE;
+ 	event.u.src_change.changes = V4L2_EVENT_SRC_CH_RESOLUTION;
+ 	v4l2_event_queue_fh(&inst->fh, &event);
+diff --git a/driver/vidc/src/msm_vidc.c b/driver/vidc/src/msm_vidc.c
+index 27d5d673..e2de2fb0 100644
+--- a/driver/vidc/src/msm_vidc.c
++++ b/driver/vidc/src/msm_vidc.c
+@@ -507,6 +507,10 @@ int msm_vidc_dqbuf(struct msm_vidc_inst *inst, void *data)
+ 		i_vpr_l(inst, "%s: failed with %d\n", __func__, rc);
+ 		goto exit;
+ 	}
++	if (inst->drc_event_pending &&
++	    b->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE &&
++	    (b->flags & V4L2_BUF_FLAG_LAST))
++		msm_vidc_send_drc_event(inst);
+ 
+ exit:
+ 	return rc;
+@@ -553,6 +557,9 @@ int msm_vidc_streamoff(struct msm_vidc_inst *inst, void *data)
+ 			__func__, type, rc);
+ 		goto exit;
+ 	}
++	if (inst->drc_event_pending &&
++	    type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE)
++		msm_vidc_send_drc_event(inst);
+ 
+ exit:
+ 	return rc;
+diff --git a/driver/vidc/src/msm_vidc_driver.c b/driver/vidc/src/msm_vidc_driver.c
+index 121df7b5..e3e579d5 100644
+--- a/driver/vidc/src/msm_vidc_driver.c
++++ b/driver/vidc/src/msm_vidc_driver.c
+@@ -1585,6 +1585,7 @@ int msm_vidc_process_resume(struct msm_vidc_inst *inst)
+ 	if (is_sub_state(inst, MSM_VIDC_DRC) &&
+ 		is_sub_state(inst, MSM_VIDC_DRC_LAST_BUFFER)) {
+ 		clear_sub_state = MSM_VIDC_DRC | MSM_VIDC_DRC_LAST_BUFFER;
++		inst->drc_event_pending = false;
+ 		/*
+ 		 * if drain sequence is not completed then do not resume here.
+ 		 * client will eventually complete drain sequence in which ports
+@@ -1856,12 +1857,26 @@ int msm_vidc_process_drain_last_flag(struct msm_vidc_inst *inst)
+ 		return 0;
+ 	}
+ 
++	/* the LAST buffer flag is replaced by V4L2_EVENT_EOS */
++	if (inst->drc_event_pending)
++		msm_vidc_send_drc_event(inst);
++
+ 	event.type = V4L2_EVENT_EOS;
+ 	v4l2_event_queue_fh(&inst->fh, &event);
+ 
+ 	return rc;
+ }
+ 
++void msm_vidc_send_drc_event(struct msm_vidc_inst *inst)
++{
++	struct v4l2_event event = {0};
++
++	inst->drc_event_pending = false;
++	event.type = V4L2_EVENT_SOURCE_CHANGE;
++	event.u.src_change.changes = V4L2_EVENT_SRC_CH_RESOLUTION;
++	v4l2_event_queue_fh(&inst->fh, &event);
++}
++
+ int msm_vidc_process_psc_last_flag(struct msm_vidc_inst *inst)
+ {
+ 	int rc = 0;
+diff --git a/driver/vidc/src/venus_hfi_response.c b/driver/vidc/src/venus_hfi_response.c
+index cab234dc..f4f252c5 100644
+--- a/driver/vidc/src/venus_hfi_response.c
++++ b/driver/vidc/src/venus_hfi_response.c
+@@ -288,6 +288,9 @@ static int handle_session_last_flag_info(struct msm_vidc_inst *inst,
+ 			rc = msm_vidc_process_psc_last_flag(inst);
+ 		else
+ 			rc = -EINVAL;
++		/* no capture buffer carries LAST on this path */
++		if (!rc && inst->drc_event_pending)
++			msm_vidc_send_drc_event(inst);
+ 	} else if (pkt->type == HFI_INFO_HFI_FLAG_DRAIN_LAST) {
+ 		if (msm_vidc_allow_drain_last_flag(inst))
+ 			rc = msm_vidc_process_drain_last_flag(inst);
+-- 
+2.43.0
+

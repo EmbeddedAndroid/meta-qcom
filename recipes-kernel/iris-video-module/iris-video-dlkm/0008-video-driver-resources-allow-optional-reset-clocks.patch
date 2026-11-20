@@ -1,0 +1,93 @@
+From ec23b76935035256970f386ff3f5494fca5260fe Mon Sep 17 00:00:00 2001
+From: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Date: Sun, 15 Nov 2026 12:30:00 +0000
+Subject: [PATCH 08/11] video-driver: resources: allow optional reset clocks
+
+A platform reset table entry that the device tree does not provide
+fails the probe. The Eliza iris node in qcom-next and in the posted
+Eliza binding lists only the bus, xo and core resets, so the vcodec
+core reset Eliza needs can only be used if the probe tolerates its
+absence.
+
+Add an optional flag to clk_rst_table. Optional entries are looked up
+with devm_reset_control_get_optional_exclusive and logged when absent;
+the handle then stays NULL, the reset ops on it do nothing and the
+bulk assert skips it.
+
+Signed-off-by: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Upstream-Status: Pending [qualcomm-linux/video-driver]
+---
+ driver/platform/common/inc/msm_vidc_platform.h |  1 +
+ driver/vidc/inc/resources.h                    |  1 +
+ driver/vidc/src/resources.c                    | 17 ++++++++++++++++-
+ 3 files changed, 18 insertions(+), 1 deletion(-)
+
+diff --git a/driver/platform/common/inc/msm_vidc_platform.h b/driver/platform/common/inc/msm_vidc_platform.h
+index b11b2f09..68cfce40 100644
+--- a/driver/platform/common/inc/msm_vidc_platform.h
++++ b/driver/platform/common/inc/msm_vidc_platform.h
+@@ -216,6 +216,7 @@ struct clk_table {
+ struct clk_rst_table {
+ 	const char      *name;
+ 	bool             exclusive_release;
++	bool             optional;
+ };
+ 
+ struct subcache_table {
+diff --git a/driver/vidc/inc/resources.h b/driver/vidc/inc/resources.h
+index 7ad6a6b1..84b93ff2 100644
+--- a/driver/vidc/inc/resources.h
++++ b/driver/vidc/inc/resources.h
+@@ -182,6 +182,7 @@ struct reset_info {
+ 	struct reset_control      *rst;
+ 	const char                *name;
+ 	bool                       exclusive_release;
++	bool                       optional;
+ };
+ 
+ struct reset_set {
+diff --git a/driver/vidc/src/resources.c b/driver/vidc/src/resources.c
+index 2c0195ee..37deb90e 100644
+--- a/driver/vidc/src/resources.c
++++ b/driver/vidc/src/resources.c
+@@ -654,6 +654,7 @@ static int __init_reset_clocks(struct msm_vidc_core *core)
+ 	for (cnt = 0; cnt < rsts->count; cnt++) {
+ 		rsts->reset_tbl[cnt].name = rst_tbl[cnt].name;
+ 		rsts->reset_tbl[cnt].exclusive_release = rst_tbl[cnt].exclusive_release;
++		rsts->reset_tbl[cnt].optional = rst_tbl[cnt].optional;
+ 	}
+ 
+ 	/* print reset clock fields */
+@@ -664,7 +665,17 @@ static int __init_reset_clocks(struct msm_vidc_core *core)
+ 
+ 	/* get reset clock handle */
+ 	venus_hfi_for_each_reset_clock(core, rinfo) {
+-		if (rinfo->exclusive_release)
++		if (rinfo->optional) {
++			/* absent from the DT: NULL, every reset op on it is a no-op */
++			rinfo->rst = devm_reset_control_get_optional_exclusive(
++				&core->pdev->dev, rinfo->name);
++			if (!IS_ERR(rinfo->rst)) {
++				if (!rinfo->rst)
++					d_vpr_e("%s: optional reset clock %s absent\n",
++						__func__, rinfo->name);
++				continue;
++			}
++		} else if (rinfo->exclusive_release)
+ 			rinfo->rst = devm_reset_control_get_exclusive_released(
+ 				&core->pdev->dev, rinfo->name);
+ 		else
+@@ -1880,6 +1891,10 @@ static int __reset_control_assert(struct msm_vidc_core *core)
+ 	int rc = 0, cnt = 0;
+ 
+ 	venus_hfi_for_each_reset_clock(core, rcinfo) {
++		if (!rcinfo->rst && rcinfo->optional) {
++			cnt++;
++			continue;
++		}
+ 		if (!rcinfo->rst) {
+ 			d_vpr_e("%s: invalid reset clock %s\n",
+ 				__func__, rcinfo->name);
+-- 
+2.43.0
+
