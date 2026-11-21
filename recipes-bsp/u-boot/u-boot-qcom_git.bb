@@ -42,6 +42,7 @@ SRC_URI += " \
     file://0020-clk-qcom-eliza-add-the-USB-3-PHY-clocks-resets-and-G.patch \
     file://0021-power-regulator-qcom-rpmh-add-PMR735D.patch \
     file://0022-configs-qcom-enable-the-QMP-USB3-DP-combo-PHY.patch \
+    file://0023-mach-snapdragon-set-the-platform-variable-from-the-S.patch \
     file://disable-eficapsule-tool.cfg \
     file://efi-rt-volatile-store.cfg \
     ${@bb.utils.contains('MACHINE_FEATURES', 'optee', 'file://tfa-optee.cfg', '', d)} \
@@ -50,8 +51,12 @@ SRC_URI += " \
 "
 
 # qcom_defconfig points fastboot flash/erase at scsi device 4 (UFS); the
-# Eliza EVK boots from eMMC.
-SRC_URI:append:eliza-evk-emmc-open-fw = " file://fastboot-emmc.cfg"
+# Eliza EVK boots from eMMC. Its U-Boot has no lock state, so fastboot
+# reports it unlocked.
+SRC_URI:append:eliza-evk-emmc-open-fw = " \
+    file://fastboot-emmc.cfg \
+    file://0024-board-qualcomm-report-the-EVK-as-unlocked-to-fastboo.patch \
+"
 
 # u-boot.inc writes UBOOT_LOCALVERSION into .scmversion only when there is
 # none, so a build directory left by an interrupted build would keep the

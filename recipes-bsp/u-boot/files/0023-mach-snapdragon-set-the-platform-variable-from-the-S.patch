@@ -1,0 +1,37 @@
+From 4e90825a928ffc09b5d53292244dc2a9d516b4e4 Mon Sep 17 00:00:00 2001
+From: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Date: Fri, 20 Nov 2026 03:17:28 -0800
+Subject: [PATCH 23/23] mach-snapdragon: set the platform variable from the SoC
+
+fastboot "getvar platform" returns the "platform" environment variable,
+which no Qualcomm board sets:
+
+  getvar:platform  FAILED (remote: 'platform not set')
+
+Set it to the SoC name parsed from the root compatible, unless the
+environment already provides one.
+
+Signed-off-by: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Upstream-Status: Pending
+---
+ arch/arm/mach-snapdragon/board.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/arch/arm/mach-snapdragon/board.c b/arch/arm/mach-snapdragon/board.c
+index 245709b962..5bf924f437 100644
+--- a/arch/arm/mach-snapdragon/board.c
++++ b/arch/arm/mach-snapdragon/board.c
+@@ -362,6 +362,10 @@ static void configure_env(void)
+ 		 env_get("soc"), env_get("board"));
+ 	env_set("fdtfile", dt_path);
+ 
++	/* fastboot "getvar platform" reports this variable */
++	if (!env_get("platform"))
++		env_set("platform", env_get("soc"));
++
+ 	qcom_set_serialno();
+ }
+ 
+-- 
+2.43.0
+

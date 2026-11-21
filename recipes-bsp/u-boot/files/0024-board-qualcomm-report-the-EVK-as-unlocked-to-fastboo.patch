@@ -1,0 +1,29 @@
+From b43d80dd2e0aa732732768f9bbaa4642ffb6b4d4 Mon Sep 17 00:00:00 2001
+From: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Date: Fri, 20 Nov 2026 23:00:00 +0000
+Subject: [PATCH 24/24] board: qualcomm: report the EVK as unlocked to fastboot
+
+getvar unlocked fails with "Variable not implemented": fb_getvar
+returns the fastboot.unlocked environment variable when it is set and
+has no handler of its own for "unlocked".
+
+This U-Boot has no lock state and flashes any partition, so say so.
+
+Signed-off-by: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Upstream-Status: Inappropriate [no lock state; qcom-next 04d89df5c2 adds one backed by the OP-TEE AVB TA and an frp partition]
+---
+ board/qualcomm/default.env | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/board/qualcomm/default.env b/board/qualcomm/default.env
+index e7ecb6c..121fe17 100644
+--- a/board/qualcomm/default.env
++++ b/board/qualcomm/default.env
+@@ -9,3 +9,4 @@ bootmenu_1=Enable fastboot mode=run fastboot
+ bootmenu_2=Reset device=reset
+ menucmd=bootmenu
+ bootcmd=run do_boot
++fastboot.unlocked=yes
+-- 
+2.43.0
+
