@@ -16,6 +16,12 @@ ALTERNATIVE_LINK_NAME[ar6004-hw13-bdata] = "${nonarch_base_libdir}/firmware/ath6
 # left untouched.
 SRC_URI:append:qcom = " file://0001-linux-firmware-qcom-sync-audioreach-firmwares-from-v.patch"
 
+# The Eliza EVK topology rebuilt with push/pull stream endpoints
+# (audioreach-topology d6bb205aca5f + 95a4d31887d9, not merged upstream),
+# which 10 ms capture periods need. Drop it once a linux-firmware release
+# ships a push/pull Eliza topology.
+SRC_URI:append:qcom = " file://0002-qcom-eliza-use-push-pull-endpoints-in-the-EVK-topolo.patch"
+
 # The topologies are binaries, which only git can apply.
 PATCHTOOL:qcom = "git"
 

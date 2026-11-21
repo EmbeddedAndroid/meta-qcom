@@ -1,0 +1,42 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Date: Sat, 21 Nov 2026 18:00:00 +0000
+Subject: [PATCH] qcom: eliza: use push/pull endpoints in the EVK topology
+
+The Eliza CQS EVK topology ends every PCM stream on the read and write
+shared memory endpoint modules. q6apm-dai holds capture periods on a
+read endpoint graph to 40 ms or more, so low latency capture is not
+possible on the EVK.
+
+Rebuild eliza-cqs-evk-tplg.bin from audioreach-topology d6bb205aca5f
+with 95a4d31887d9 ("audioreach: add support for push pull modules")
+cherry-picked from Srinivas Kandagatla's push/pull branch, which puts
+the push and pull mode shared memory modules at the stream ends.
+Built with cmake and alsatplg 1.2.9; the same tree without the
+cherry-pick rebuilds the current file byte for byte.
+
+Signed-off-by: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Upstream-Status: Inappropriate [built from audioreach-topology push/pull support that is not merged]
+---
+ qcom/eliza/eliza-cqs-evk-tplg.bin | Bin 38540 -> 38540 bytes
+ 1 file changed, 0 insertions(+), 0 deletions(-)
+
+diff --git a/qcom/eliza/eliza-cqs-evk-tplg.bin b/qcom/eliza/eliza-cqs-evk-tplg.bin
+index fafd747a2609263d367eec2f0c833a8a416cafc2..f33209f3259c790916388d6eb5cf36ea01d9c995 100644
+GIT binary patch
+delta 294
+zcmeBK%ha=$X+sY)S8+yeYHoZ%X->{$K{lz$8<;OJvTbf;@n%Jr`M?R1Imq>y2QE{b
+z0oJpik7x3qG=<3mwmg#sBxW$OPyVQ@zWIWL3c?Ji$_rUKU{wKfFjWHbNUET22$;k@
+z`E-dQSmgwj8H{X`8(Gvh2dJJ2fZGgFx!IwtfC)`(@`g&CO_hHT9s^qK*y=X9phjnM
+cLmkKFhFSrH7Kq&D2laChVo;+OG`$f90Gi}$k^lez
+
+delta 280
+zcmeBK%ha=$X+sb5WF2|E$@}7!CJWf|OkTh~fs-+Tf#C!L5NvK_@n(fc^KnfMNR|LA
+zX%LveDF9b;kn1xKQ&GxfJ$aqUztSLv2uRFeWSsm_SAFvZ2^ChD?5!+_Y=9h0RzO|_
+zV*IHRh|~m?8H@~*8(Gvh2dJJ2n4Hs~HF;hc+h(7#6ebX7^Q{Uc7Km|5lRuOhO+Ht{
+zHo2xoVRAzq$L5Aw0VZTQu6nh}6B;--i#DW#HBbK6#5Q?@n$P3~O+1qeR23$*=zz_D
+P2rB@EIW})-z9R$xKlx);
+
+-- 
+2.43.0
+
