@@ -1,0 +1,37 @@
+From 582f1b6c7df948e2fef419fba6f8b9221b6c3d5d Mon Sep 17 00:00:00 2001
+From: David Heidelberg <david@ixit.cz>
+Date: Thu, 4 Sep 2026 17:53:47 +0000
+Subject: [PATCH 22/23] configs: qcom: enable QMP USB3-DP combo PHY
+
+SDM845 boards need this PHY to bring up their USB controller, and
+without it in the defconfig the driver is silently left out of the
+build, so the PHY never binds and USB gadget mode fails with:
+
+  dwc3-generic-peripheral usb@a600000: failed to enable ep0out
+
+Reviewed-by: Casey Connolly <casey.connolly@linaro.org>
+Signed-off-by: David Heidelberg <david@ixit.cz>
+Link: https://patch.msgid.link/20260904-b4-sdm845-usb-gadget-v2-4-cf1baa65a6d4@ixit.cz
+Signed-off-by: Casey Connolly <casey.connolly@linaro.org>
+(cherry picked from commit 582f1b6c7df948e2fef419fba6f8b9221b6c3d5d)
+Signed-off-by: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Upstream-Status: Backport [qualcomm-linux/u-boot qcom-next 582f1b6c7df9]
+---
+ configs/qcom_defconfig | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/configs/qcom_defconfig b/configs/qcom_defconfig
+index 91ccdf0a88..d5962e7616 100644
+--- a/configs/qcom_defconfig
++++ b/configs/qcom_defconfig
+@@ -132,6 +132,7 @@ CONFIG_PCI_PNP=y
+ CONFIG_CMD_PCI=y
+ CONFIG_PCIE_DW_QCOM=y
+ CONFIG_PHY=y
++CONFIG_PHY_QCOM_QMP_COMBO=y
+ CONFIG_PHY_QCOM_QMP_PCIE=y
+ CONFIG_PHY_QCOM_QMP_UFS=y
+ CONFIG_PHY_QCOM_QUSB2=y
+-- 
+2.43.0
+

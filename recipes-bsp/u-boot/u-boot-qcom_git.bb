@@ -35,6 +35,13 @@ SRC_URI += " \
     file://0013-spmi-msm-support-the-multi-bus-v7-arbiter-binding.patch \
     file://0014-reboot-mode-add-dm_reboot_mode_set.patch \
     file://0015-fastboot-store-the-reboot-reason-in-a-reboot-mode-de.patch \
+    file://0016-phy-qcom-qmp-combo-select-PCS-register-offsets-per-v.patch \
+    file://0017-phy-qcom-qmp-combo-leave-the-supplies-on-at-exit.patch \
+    file://0018-phy-qcom-qmp-combo-enable-the-optional-ref-clock.patch \
+    file://0019-phy-qcom-qmp-combo-add-SM8650-support.patch \
+    file://0020-clk-qcom-eliza-add-the-USB-3-PHY-clocks-resets-and-G.patch \
+    file://0021-power-regulator-qcom-rpmh-add-PMR735D.patch \
+    file://0022-configs-qcom-enable-the-QMP-USB3-DP-combo-PHY.patch \
     file://disable-eficapsule-tool.cfg \
     file://efi-rt-volatile-store.cfg \
     ${@bb.utils.contains('MACHINE_FEATURES', 'optee', 'file://tfa-optee.cfg', '', d)} \

@@ -1,0 +1,126 @@
+From 9c13af84a6a19298de9dfbe48174590b22575bac Mon Sep 17 00:00:00 2001
+From: David Heidelberg <david@ixit.cz>
+Date: Fri, 4 Sep 2026 19:53:44 +0200
+Subject: [PATCH 16/23] phy: qcom: qmp-combo: select PCS register offsets per
+ version
+
+The driver accesses four PCS registers outside of the init tables:
+SW_RESET, POWER_DOWN_CONTROL, START_CONTROL and PCS_STATUS. These are
+currently hardcoded to their v4 offsets, which is correct for the only
+supported PHY (sc7280) but prevents adding a v3 based one, as only
+SW_RESET kept its offset between the two revisions:
+
+                        v3     v4
+  POWER_DOWN_CONTROL   0x004  0x040
+  START_CONTROL        0x008  0x044
+  PCS_STATUS           0x174  0x014
+
+Move the four offsets into a new struct qmp_combo_regs and select them
+through the per-PHY configuration, mirroring what the Linux driver does
+with its regs layout.
+
+No functional change intended.
+
+Reviewed-by: Casey Connolly <casey.connolly@linaro.org>
+Signed-off-by: David Heidelberg <david@ixit.cz>
+Link: https://patch.msgid.link/20260904-b4-sdm845-usb-gadget-v2-1-cf1baa65a6d4@ixit.cz
+Signed-off-by: Casey Connolly <casey.connolly@linaro.org>
+(cherry picked from commit 38e4b378d55c7f834890d152eaed8358d30f6ad9)
+Upstream-Status: Backport [qualcomm-linux/u-boot qcom-next 38e4b378d5]
+---
+ drivers/phy/qcom/phy-qcom-qmp-combo.c | 34 +++++++++++++++++++++------
+ 1 file changed, 27 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/phy/qcom/phy-qcom-qmp-combo.c b/drivers/phy/qcom/phy-qcom-qmp-combo.c
+index 615d481513..7f1209aa13 100644
+--- a/drivers/phy/qcom/phy-qcom-qmp-combo.c
++++ b/drivers/phy/qcom/phy-qcom-qmp-combo.c
+@@ -50,6 +50,24 @@
+ 
+ #define PHY_INIT_COMPLETE_TIMEOUT		10000
+ 
++/*
++ * Only SW_RESET kept its offset when the PCS block moved from v3 to v4, so the
++ * registers accessed outside the init tables have to be selected per version.
++ */
++struct qmp_combo_regs {
++	u16 sw_reset;
++	u16 pwrdn_ctrl;
++	u16 start_ctrl;
++	u16 pcs_status;
++};
++
++static const struct qmp_combo_regs qmp_combo_regs_v4 = {
++	.sw_reset	= QPHY_V4_PCS_SW_RESET,
++	.pwrdn_ctrl	= QPHY_V4_PCS_POWER_DOWN_CONTROL,
++	.start_ctrl	= QPHY_V4_PCS_START_CONTROL,
++	.pcs_status	= QPHY_V4_PCS_PCS_STATUS1,
++};
++
+ struct qmp_combo_offsets {
+ 	u16 com;
+ 	u16 txa;
+@@ -195,6 +213,7 @@ static const struct qmp_phy_init_tbl sm8250_usb3_pcs_usb_tbl[] = {
+ 
+ struct qmp_phy_cfg {
+ 	const struct qmp_combo_offsets *offsets;
++	const struct qmp_combo_regs *regs;
+ 	const struct qmp_phy_init_tbl *serdes_tbl;
+ 	int serdes_tbl_num;
+ 	const struct qmp_phy_init_tbl *tx_tbl;
+@@ -351,7 +370,7 @@ static int qmp_combo_com_init(struct qmp_combo *qmp)
+ 
+ 	qphy_clrbits(com, QPHY_V3_DP_COM_SW_RESET, SW_RESET);
+ 
+-	qphy_setbits(pcs, QPHY_V4_PCS_POWER_DOWN_CONTROL, SW_PWRDN);
++	qphy_setbits(pcs, qmp->cfg->regs->pwrdn_ctrl, SW_PWRDN);
+ 
+ 	return 0;
+ }
+@@ -398,14 +417,14 @@ static int qmp_combo_usb_power_on(struct qmp_combo *qmp)
+ 		udelay(20);
+ 
+ 	/* Pull PHY out of reset */
+-	qphy_clrbits(pcs, QPHY_V4_PCS_SW_RESET, SW_RESET);
++	qphy_clrbits(pcs, cfg->regs->sw_reset, SW_RESET);
+ 
+ 	/* Start SerDes and Phy-Coding-Sublayer */
+-	qphy_setbits(pcs, QPHY_V4_PCS_START_CONTROL,
++	qphy_setbits(pcs, cfg->regs->start_ctrl,
+ 		     SERDES_START | PCS_START);
+ 
+ 	/* Wait for PHY initialization */
+-	ret = readl_poll_timeout(pcs + QPHY_V4_PCS_PCS_STATUS1, val,
++	ret = readl_poll_timeout(pcs + cfg->regs->pcs_status, val,
+ 				 !(val & PHYSTATUS), PHY_INIT_COMPLETE_TIMEOUT);
+ 
+ 	if (ret) {
+@@ -445,14 +464,14 @@ static int qmp_combo_power_off(struct phy *phy)
+ 	clk_disable(qmp->pipe_clk);
+ 
+ 	/* PHY reset */
+-	qphy_setbits(qmp->pcs, QPHY_V4_PCS_SW_RESET, SW_RESET);
++	qphy_setbits(qmp->pcs, qmp->cfg->regs->sw_reset, SW_RESET);
+ 
+ 	/* Stop SerDes and Phy-Coding-Sublayer */
+-	qphy_clrbits(qmp->pcs, QPHY_V4_PCS_START_CONTROL,
++	qphy_clrbits(qmp->pcs, qmp->cfg->regs->start_ctrl,
+ 		     SERDES_START | PCS_START);
+ 
+ 	/* Put PHY into POWER DOWN state: active low */
+-	qphy_clrbits(qmp->pcs, QPHY_V4_PCS_POWER_DOWN_CONTROL, SW_PWRDN);
++	qphy_clrbits(qmp->pcs, qmp->cfg->regs->pwrdn_ctrl, SW_PWRDN);
+ 
+ 	/* Power down common block */
+ 	qphy_clrbits(com, QPHY_V3_DP_COM_POWER_DOWN_CTRL, SW_PWRDN);
+@@ -622,6 +641,7 @@ static int qmp_combo_probe(struct udevice *dev)
+ 
+ static const struct qmp_phy_cfg sc7280_usb3dpphy_cfg = {
+ 	.offsets		= &qmp_combo_offsets_v3,
++	.regs			= &qmp_combo_regs_v4,
+ 	.serdes_tbl		= sm8150_usb3_serdes_tbl,
+ 	.serdes_tbl_num		= ARRAY_SIZE(sm8150_usb3_serdes_tbl),
+ 	.tx_tbl			= sm8250_usb3_tx_tbl,
+-- 
+2.43.0
+

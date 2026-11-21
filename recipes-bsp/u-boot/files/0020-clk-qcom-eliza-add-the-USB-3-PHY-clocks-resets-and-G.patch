@@ -1,0 +1,82 @@
+From fb9a2efe7173b02348a24f7b430963e68a88ddfb Mon Sep 17 00:00:00 2001
+From: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Date: Fri, 20 Nov 2026 03:17:28 -0800
+Subject: [PATCH 20/23] clk: qcom: eliza: add the USB 3 PHY clocks, resets and
+ GDSC
+
+The Eliza USB3-DP combo PHY references the pipe clock, the PHY and
+DP PHY block resets, the USB 3 PHY GDSC and the TCSR USB 3 reference
+clock, none of which the clock driver provides, so the PHY cannot
+probe.
+
+Add them with the register offsets from the Linux gcc-eliza and
+tcsrcc-eliza drivers. The pipe clock source mux is pointed at the PHY
+pipe clock when the branch is enabled.
+
+Signed-off-by: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Upstream-Status: Pending
+---
+ drivers/clk/qcom/clock-eliza.c | 14 +++++++++++++-
+ 1 file changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/clk/qcom/clock-eliza.c b/drivers/clk/qcom/clock-eliza.c
+index 73f536afaf..bc531ce063 100644
+--- a/drivers/clk/qcom/clock-eliza.c
++++ b/drivers/clk/qcom/clock-eliza.c
+@@ -121,13 +121,17 @@ static const struct gate_clk eliza_clks[] = {
+ 	GATE_CLK_POLLED(GCC_USB30_PRIM_SLEEP_CLK,	0x39028, BIT(0), 0x39028),
+ 	GATE_CLK(GCC_USB3_PRIM_PHY_AUX_CLK,		0x39064, BIT(0)),
+ 	GATE_CLK(GCC_USB3_PRIM_PHY_COM_AUX_CLK,		0x39068, BIT(0)),
++	GATE_CLK(GCC_USB3_PRIM_PHY_PIPE_CLK,		0x3906c, BIT(0)),
+ };
+ 
+ static int eliza_enable(struct clk *clk)
+ {
+ 	struct msm_clk_priv *priv = dev_get_priv(clk->dev);
+ 
+-	/* No U-Boot driver handles the USB 3 PHY: enable its aux clocks, as SM8650 does */
++	/*
++	 * Without the USB 3 PHY driver the controller runs high-speed only
++	 * but still needs the PHY aux clocks, as on SM8650.
++	 */
+ 	switch (clk->id) {
+ 	case GCC_AGGRE_USB3_PRIM_AXI_CLK:
+ 		qcom_gate_clk_en(priv, GCC_USB30_PRIM_MASTER_CLK);
+@@ -136,6 +140,10 @@ static int eliza_enable(struct clk *clk)
+ 		qcom_gate_clk_en(priv, GCC_USB3_PRIM_PHY_AUX_CLK);
+ 		qcom_gate_clk_en(priv, GCC_USB3_PRIM_PHY_COM_AUX_CLK);
+ 		break;
++	case GCC_USB3_PRIM_PHY_PIPE_CLK:
++		/* GCC_USB3_PRIM_PHY_PIPE_CLK_SRC */
++		clk_phy_mux_enable(priv->base, 0x39070, true);
++		break;
+ 	}
+ 
+ 	return qcom_gate_clk_en(priv, clk->id);
+@@ -147,12 +155,15 @@ static const struct qcom_reset_map eliza_gcc_resets[] = {
+ 	[GCC_SDCC2_BCR] = { 0x14000 },
+ 	[GCC_UFS_PHY_BCR] = { 0x77000 },
+ 	[GCC_USB30_PRIM_BCR] = { 0x39000 },
++	[GCC_USB3_DP_PHY_PRIM_BCR] = { 0x50008 },
++	[GCC_USB3_PHY_PRIM_BCR] = { 0x50000 },
+ };
+ 
+ static const struct qcom_power_map eliza_gdscs[] = {
+ 	[GCC_UFS_MEM_PHY_GDSC] = { 0x9e000 },
+ 	[GCC_UFS_PHY_GDSC] = { 0x77004 },
+ 	[GCC_USB30_PRIM_GDSC] = { 0x39004 },
++	[GCC_USB3_PHY_GDSC] = { 0x50018 },
+ };
+ 
+ static struct msm_clk_data eliza_gcc_data = {
+@@ -187,6 +198,7 @@ U_BOOT_DRIVER(gcc_eliza) = {
+ 
+ static const struct gate_clk eliza_tcsr_clks[] = {
+ 	GATE_CLK(TCSR_USB2_CLKREF_EN,		0x4, BIT(0)),
++	GATE_CLK(TCSR_USB3_CLKREF_EN,		0x10, BIT(0)),
+ };
+ 
+ static struct msm_clk_data eliza_tcsrcc_data = {
+-- 
+2.43.0
+

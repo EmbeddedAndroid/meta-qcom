@@ -1,0 +1,55 @@
+From 297967f166c41fa2731138ad2cd16a0d8bd838bb Mon Sep 17 00:00:00 2001
+From: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Date: Fri, 20 Nov 2026 03:17:28 -0800
+Subject: [PATCH 17/23] phy: qcom: qmp-combo: leave the supplies on at exit
+
+qmp_combo_com_exit disables vdda-phy and vdda-pll. U-Boot regulators
+are not reference counted, so when a supply is shared with another
+consumer that never takes its own reference, the exit turns it off
+under that consumer. On Eliza vdda-pll is vreg_l7k, also the eUSB2
+PHY's vdd, and the eUSB2 driver does not request its supply: once the
+controller is removed (fastboot exit), the next probe would initialise
+the high-speed PHY unpowered.
+
+Keep the supplies on at exit; Linux takes them over with proper
+counting.
+
+Signed-off-by: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Upstream-Status: Pending
+---
+ drivers/phy/qcom/phy-qcom-qmp-combo.c | 13 ++++++-------
+ 1 file changed, 6 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/phy/qcom/phy-qcom-qmp-combo.c b/drivers/phy/qcom/phy-qcom-qmp-combo.c
+index 7f1209aa13..dadb722799 100644
+--- a/drivers/phy/qcom/phy-qcom-qmp-combo.c
++++ b/drivers/phy/qcom/phy-qcom-qmp-combo.c
+@@ -289,19 +289,18 @@ static inline void qphy_clrbits(void __iomem *base, u32 offset, u32 val)
+ 
+ static int qmp_combo_com_exit(struct qmp_combo *qmp)
+ {
+-	int i, ret;
++	int i;
+ 
+ 	for (i = 0; i < qmp->num_clks; i++)
+ 		clk_disable(&qmp->clks[i]);
+ 
+ 	reset_assert_bulk(&qmp->resets);
+ 
+-	for (i = qmp->num_vregs - 1; i >= 0; i--) {
+-		ret = regulator_set_enable(qmp->vregs[i], false);
+-		if (ret)
+-			dev_warn(qmp->dev, "failed to disable %s: %d\n",
+-				 qmp->cfg->vreg_list[i], ret);
+-	}
++	/*
++	 * The supplies stay on: U-Boot regulators are not reference counted
++	 * and they can be shared with the high-speed PHY, which would then
++	 * be initialised unpowered on the next controller probe.
++	 */
+ 
+ 	return 0;
+ }
+-- 
+2.43.0
+
