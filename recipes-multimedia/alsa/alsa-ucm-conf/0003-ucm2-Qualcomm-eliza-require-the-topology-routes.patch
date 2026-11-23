@@ -1,0 +1,67 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Date: Tue, 24 Nov 2026 07:45:30 +0000
+Subject: [PATCH] ucm2: Qualcomm: eliza: require the topology routes
+
+Images that use the AudioReach PAL stack register the Eliza CQS EVK
+card through the out of tree AudioReach driver: the same driver name
+"eliza" and card name "eliza-cqs-evk", but built from the DT back end
+links alone, with no topology front ends and no MultiMedia routes. The
+EVK configuration is found there as well, lists HiFi, and setting HiFi
+fails on its first cset ("failed to initialize new use case: HiFi"),
+so the card advertises a use case it cannot run.
+
+Load the EVK configuration only when the WSA MultiMedia1 route the
+HiFi verb sets exists. Without it the configuration is empty and
+alsa-lib reports no use case configuration for the card, as before the
+profile was added.
+
+Signed-off-by: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Upstream-Status: Pending
+---
+ .../eliza/eliza-cqs-evk/eliza-cqs-evk.conf    | 34 ++++++++++++-------
+ 1 file changed, 22 insertions(+), 12 deletions(-)
+
+diff --git a/ucm2/Qualcomm/eliza/eliza-cqs-evk/eliza-cqs-evk.conf b/ucm2/Qualcomm/eliza/eliza-cqs-evk/eliza-cqs-evk.conf
+index 2e24ba1..e5e8733 100644
+--- a/ucm2/Qualcomm/eliza/eliza-cqs-evk/eliza-cqs-evk.conf
++++ b/ucm2/Qualcomm/eliza/eliza-cqs-evk/eliza-cqs-evk.conf
+@@ -1,16 +1,26 @@
+ Syntax 4
+ 
+-SectionUseCase."HiFi" {
+-	File "/Qualcomm/eliza/eliza-cqs-evk/HiFi.conf"
+-	Comment "HiFi quality Music."
+-}
++# The AudioReach driver of the PAL based images registers the same card
++# without the topology front ends and their routes; HiFi needs them.
++If.topology {
++	Condition {
++		Type ControlExists
++		Control "name='WSA_CODEC_DMA_RX_0 Audio Mixer MultiMedia1'"
++	}
++	True {
++		SectionUseCase."HiFi" {
++			File "/Qualcomm/eliza/eliza-cqs-evk/HiFi.conf"
++			Comment "HiFi quality Music."
++		}
+ 
+-BootSequence [
+-	cset "name='SpkrLeft PA Volume' 12"
+-	cset "name='SpkrRight PA Volume' 12"
+-]
++		BootSequence [
++			cset "name='SpkrLeft PA Volume' 12"
++			cset "name='SpkrRight PA Volume' 12"
++		]
+ 
+-Include.card-init.File "/lib/card-init.conf"
+-Include.ctl-remap.File "/lib/ctl-remap.conf"
+-Include.wsa-init.File "/codecs/wsa884x/two-speakers/init.conf"
+-Include.wsam-init.File "/codecs/qcom-lpass/wsa-macro/init.conf"
++		Include.card-init.File "/lib/card-init.conf"
++		Include.ctl-remap.File "/lib/ctl-remap.conf"
++		Include.wsa-init.File "/codecs/wsa884x/two-speakers/init.conf"
++		Include.wsam-init.File "/codecs/qcom-lpass/wsa-macro/init.conf"
++	}
++}

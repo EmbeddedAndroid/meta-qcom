@@ -1,0 +1,58 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Date: Mon, 23 Nov 2026 21:34:20 +0000
+Subject: [PATCH] ucm2: Qualcomm: eliza: match the CQS EVK by its card name
+
+The EVK configuration is reached through
+conf.d/eliza/eliza-cqs-evk.conf, which alsa-lib looks up by the card
+long name. The long name equals the card name ("eliza-cqs-evk", the
+model of the DT sound node) only when the boot firmware provides no
+SMBIOS tables; otherwise ASoC builds it from DMI. Under U-Boot the EVK
+reports board vendor "qcom" and product " Inc. Eliza CQS EVK", so the
+long name is "qcom-Inc.ElizaCQSEVK" and no configuration is found
+("failed to import hw:0 use case configuration -2").
+
+Add the driver level conf.d/eliza/eliza.conf, which alsa-lib tries
+next, and pick the EVK configuration there by the card name, which
+does not depend on the firmware.
+
+Signed-off-by: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Upstream-Status: Pending
+---
+ ucm2/Qualcomm/eliza/eliza.conf | 14 ++++++++++++++
+ ucm2/conf.d/eliza/eliza.conf   |  1 +
+ 2 files changed, 15 insertions(+)
+ create mode 100644 ucm2/Qualcomm/eliza/eliza.conf
+ create mode 120000 ucm2/conf.d/eliza/eliza.conf
+
+diff --git a/ucm2/Qualcomm/eliza/eliza.conf b/ucm2/Qualcomm/eliza/eliza.conf
+new file mode 100644
+index 0000000..358cc6d
+--- /dev/null
++++ b/ucm2/Qualcomm/eliza/eliza.conf
+@@ -0,0 +1,14 @@
++Syntax 4
++
++# The card long name is built from DMI when the boot firmware provides
++# SMBIOS tables, so it depends on the firmware; the card name is the
++# model of the DT sound node.
++
++If.cqsevk {
++	Condition {
++		Type String
++		String1 "${CardName}"
++		String2 "eliza-cqs-evk"
++	}
++	True.Include.evk.File "/Qualcomm/eliza/eliza-cqs-evk/eliza-cqs-evk.conf"
++}
+diff --git a/ucm2/conf.d/eliza/eliza.conf b/ucm2/conf.d/eliza/eliza.conf
+new file mode 120000
+index 0000000..013a8fc
+--- /dev/null
++++ b/ucm2/conf.d/eliza/eliza.conf
+@@ -0,0 +1 @@
++../../Qualcomm/eliza/eliza.conf
+\ No newline at end of file
+-- 
+2.53.0
+
