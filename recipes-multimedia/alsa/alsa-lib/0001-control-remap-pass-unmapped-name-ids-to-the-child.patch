@@ -1,0 +1,54 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Date: Tue, 24 Nov 2026 01:52:34 +0000
+Subject: [PATCH] control: remap - pass unmapped name ids to the child
+
+Since commit 166407da ("control: remap - fix numid lookup issue"),
+remap_find_numid_app returns NULL for numid 0. An element id given by
+name only (numid 0) that matches no remap entry, the way
+"amixer cset name=..." addresses a control, therefore reaches
+remap_load_list and then fails with -ENOENT, so no element that the
+remap passes through can be read or written by name. Before that
+commit numid 0 was passed to the child unchanged.
+
+The remap is the default control device of every card whose UCM
+configuration merges controls (for example the WSA88xx two-speaker
+"Speakers Volume"), as soon as alsactl has saved it, so name based
+amixer access to all other controls of those cards fails.
+
+Pass a name based id that matches no remap entry to the child as is,
+which resolves the name, and only translate the numid back to the
+application numid when one was set.
+
+Fixes: 166407da ("control: remap - fix numid lookup issue")
+Signed-off-by: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Upstream-Status: Pending
+---
+ src/control/control_remap.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/control/control_remap.c b/src/control/control_remap.c
+index 80a0f43b..14de1628 100644
+--- a/src/control/control_remap.c
++++ b/src/control/control_remap.c
+@@ -309,7 +309,7 @@ _retry:
+ 			}
+ 		}
+ 		*id = rid->id_child;
+-	} else {
++	} else if (id->numid > 0) {
+ 		numid = remap_find_numid_app(priv, id->numid);
+ 		if (numid) {
+ 			id->numid = numid->numid_child;
+@@ -343,7 +343,7 @@ static int remap_id_to_app(snd_ctl_remap_t *priv, snd_ctl_elem_id_t *id, snd_ctl
+ 		}
+ 		*id = rid->id_app;
+ 	} else {
+-		if (err >= 0) {
++		if (err >= 0 && id->numid > 0) {
+ 			numid = remap_find_numid_child(priv, id->numid);
+ 			if (numid == NULL)
+ 				return -EIO;
+-- 
+2.53.0
+
