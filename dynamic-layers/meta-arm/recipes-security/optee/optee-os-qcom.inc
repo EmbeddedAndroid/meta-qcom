@@ -11,7 +11,7 @@ SRCREV_optee = "bd57d28b5ac226fe108ef96730b650b8a08bcff4"
 # the TA devkit both build from this tree so that the TAs match the OS.
 PV:eliza = "4.11.0-qcom-eliza+git"
 OPTEE_QCOM_GIT:eliza = "git://github.com/EmbeddedAndroid/optee_os.git;protocol=https;name=optee;branch=qcom/eliza-next"
-SRCREV_optee:eliza = "7a8e0bb1a05ac9b0172907d977981a8cf65f32d1"
+SRCREV_optee:eliza = "be844404542f0a82d3d506f6a8798f7ca1c5a42f"
 
 # Enable PKCS#11 TA as part of the OP-TEE build
 EXTRA_OEMAKE:append = " CFG_PKCS11_TA=y"
