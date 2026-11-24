@@ -8,8 +8,9 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/linux-qcom-eliza:"
 
 # eliza/integration: qcom-next 17bbb4b37bbc, the LINUX_QCOM_NEXT_FIXES of
 # linux-qcom-next, then the Eliza EVK boot, HDMI, display colour and
-# writeback, camera (IMX577 on CAM0, OV9282 on CAM1) and audio series.
-SRCREV = "451b156cd915c443d7220783eb57a81788548952"
+# writeback, camera (IMX577 on CAM0, OV9282 on CAM1) and audio series,
+# and the CamX camera nodes with the GCC camera AXI sleep stage resets.
+SRCREV = "8495558ca25bf30f48058761da06f445f2ec9086"
 
 SRC_URI = " \
     git://github.com/EmbeddedAndroid/linux.git;protocol=https;branch=eliza/integration \
