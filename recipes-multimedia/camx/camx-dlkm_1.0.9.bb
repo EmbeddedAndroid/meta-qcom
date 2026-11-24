@@ -9,6 +9,11 @@ SRC_URI = " \
 
 SRCREV = "08171ddc9d6ad81c13e6f1b362248d4736b0e804"
 
+SRC_URI:eliza = " \
+    git://github.com/EmbeddedAndroid/camera-driver.git;protocol=https;branch=eliza/titan970 \
+"
+SRCREV:eliza = "68110feaae37ccfebade9baad25c91510b7e4afc"
+
 inherit module
 
 MAKE_TARGETS = "modules"
