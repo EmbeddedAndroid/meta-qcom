@@ -6,13 +6,12 @@ COMPATIBLE_MACHINE = "(eliza)"
 
 FILESEXTRAPATHS:prepend := "${THISDIR}/linux-qcom-eliza:"
 
-# eliza/integration: qcom-next 17bbb4b37bbc, the LINUX_QCOM_NEXT_FIXES of
-# linux-qcom-next, then the Eliza EVK boot, HDMI, display colour and
-# writeback, camera (IMX577 on CAM0, OV9282 on CAM1) and audio series.
-SRCREV = "5124d7d4eb49e2e2baa910029f784c84ded94eaa"
+# eliza/camx-v4: eliza/integration 5124d7d4eb49 plus the CamX camera
+# nodes and the gcc camera AXI sleep stage resets.
+SRCREV = "990fbc13e8a3feaf1cd89daa89f91ca37809bc53"
 
 SRC_URI = " \
-    git://github.com/EmbeddedAndroid/linux.git;protocol=https;branch=eliza/integration \
+    git://github.com/EmbeddedAndroid/linux.git;protocol=https;branch=eliza/camx-v4 \
     file://configs/bsp-additions.cfg \
     file://configs/no-smccc-soc-id.cfg \
 "
